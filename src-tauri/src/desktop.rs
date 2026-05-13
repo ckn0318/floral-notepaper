@@ -502,7 +502,7 @@ fn prewarm_notepad(app: &AppHandle) -> Result<(), AppError> {
     let specs = notepad_window_specs();
     let visual_options = dynamic_window_visual_options(&label);
 
-    WebviewWindowBuilder::new(
+    let builder = WebviewWindowBuilder::new(
         app,
         &label,
         WebviewUrl::App("index.html?view=notepad&standby=1".into()),
@@ -511,9 +511,12 @@ fn prewarm_notepad(app: &AppHandle) -> Result<(), AppError> {
     .inner_size(specs.width, specs.height)
     .min_inner_size(specs.min_width, specs.min_height)
     .resizable(true)
-    .decorations(false)
-    .transparent(visual_options.transparent)
-    .always_on_top(true)
+    .decorations(false);
+
+    #[cfg(target_os = "windows")]
+    let builder = builder.transparent(visual_options.transparent);
+
+    builder.always_on_top(true)
     .shadow(false)
     .visible(false)
     .focused(false)
@@ -582,14 +585,17 @@ fn open_or_focus_window(
         return Ok(label.to_string());
     }
 
-    let mut builder = WebviewWindowBuilder::new(app, label, WebviewUrl::App(url.into()))
+    let builder = WebviewWindowBuilder::new(app, label, WebviewUrl::App(url.into()))
         .title(title)
         .inner_size(width, height)
         .min_inner_size(min_width, min_height)
         .resizable(true)
-        .decorations(decorations)
-        .transparent(visual_options.transparent)
-        .always_on_top(always_on_top)
+        .decorations(decorations);
+
+    #[cfg(target_os = "windows")]
+    let builder = builder.transparent(visual_options.transparent);
+
+    let mut builder = builder.always_on_top(always_on_top)
         .shadow(shadow)
         .visible(false);
 
