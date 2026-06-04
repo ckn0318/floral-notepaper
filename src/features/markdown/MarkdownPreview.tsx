@@ -7,7 +7,6 @@ import rehypeKatex from "rehype-katex";
 import rehypeRaw from "rehype-raw";
 import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
 import rehypeSlug from "rehype-slug";
-import type { Pluggable } from "unified";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import type { Components } from "react-markdown";
@@ -80,12 +79,12 @@ const sanitizeSchema = {
   },
 };
 const rehypePluginsDefault = [rehypeKatex, rehypeSlug];
-const rehypePluginsWithHtml: Pluggable[] = [
+const rehypePluginsWithHtml = [
   rehypeRaw,
   [rehypeSanitize, sanitizeSchema],
   rehypeKatex,
   rehypeSlug,
-];
+] as Parameters<typeof Markdown>[0]["rehypePlugins"];
 
 const staticComponents: Components = {
   h1: ({ children, id }) => (
