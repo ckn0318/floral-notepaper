@@ -36,7 +36,7 @@
     "desktopConfig": "桌面配置更新失败",
     "duplicateShortcut": "显示/隐藏窗口快捷键不能与呼出小窗快捷键重复",
     "imagePasteFailed": "图片粘贴失败",
-    "imageTooLarge": "图片文件过大（上限 20 MB）",
+    "imageTooLarge": "图片文件过大（上限 5 MB）",
     "noPool": "便签窗口池尚未初始化",
     "noteNotFound": "找不到该笔记",
     "unsupportedFile": "只支持导入 .md 文件",
@@ -175,7 +175,8 @@
     "tab": {
       "edit": "编辑",
       "new": "新建",
-      "open": "打开"
+      "open": "打开",
+      "preview": "预览"
     },
     "tooltip": {
       "close": "关闭",

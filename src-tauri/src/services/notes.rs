@@ -1,7 +1,7 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
     env, fmt, fs, io,
     path::{Component, Path, PathBuf},
 };
@@ -580,7 +580,41 @@ impl NoteStore {
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)?;
         }
-        fs::write(path, note.content)?;
+        fs::write(path, &note.content)?;
+        self.export_referenced_images(&note.id, &note.content, path)?;
+        Ok(())
+    }
+
+    fn export_referenced_images(
+        &self,
+        note_id: &str,
+        content: &str,
+        markdown_path: &Path,
+    ) -> Result<(), AppError> {
+        let Some(export_dir) = markdown_path.parent() else {
+            return Ok(());
+        };
+
+        let source_dir = self.images_dir(note_id);
+        if !source_dir.exists() {
+            return Ok(());
+        }
+
+        let target_dir = export_dir.join("images").join(note_id);
+        for file_name in referenced_image_files(note_id, content) {
+            if !is_safe_image_file_name(&file_name) {
+                continue;
+            }
+
+            let source = source_dir.join(&file_name);
+            if !source.is_file() {
+                continue;
+            }
+
+            fs::create_dir_all(&target_dir)?;
+            fs::copy(source, target_dir.join(file_name))?;
+        }
+
         Ok(())
     }
 
@@ -1056,6 +1090,34 @@ fn imported_markdown_title(path: &Path, content: &str) -> String {
         .to_string()
 }
 
+fn referenced_image_files(note_id: &str, content: &str) -> BTreeSet<String> {
+    let marker = format!("images/{note_id}/");
+    let mut files = BTreeSet::new();
+    let mut offset = 0usize;
+
+    while let Some(relative_start) = content[offset..].find(&marker) {
+        let name_start = offset + relative_start + marker.len();
+        let rest = &content[name_start..];
+        let name_len = rest
+            .find(|ch: char| ch == ')' || ch == '"' || ch == '\'' || ch.is_whitespace())
+            .unwrap_or(rest.len());
+        if name_len > 0 {
+            files.insert(rest[..name_len].to_string());
+        }
+        offset = name_start + name_len;
+    }
+
+    files
+}
+
+fn is_safe_image_file_name(file_name: &str) -> bool {
+    !file_name.is_empty()
+        && !file_name.contains("..")
+        && !file_name.contains('/')
+        && !file_name.contains('\\')
+        && !file_name.contains(':')
+}
+
 fn default_note_auto_save() -> bool {
     true
 }
@@ -1476,5 +1538,75 @@ mod tests {
             fs::read_to_string(export_path).expect("read exported markdown"),
             content
         );
+    }
+
+    #[test]
+    fn exports_referenced_note_images_next_to_markdown() {
+        let root = test_root("export-markdown-images");
+        let store = NoteStore::new(root.join("store"));
+        let note = store
+            .create_note(SaveNoteRequest {
+                title: "带图笔记".into(),
+                content: String::new(),
+                category: String::new(),
+            })
+            .expect("create note");
+        let used_image = store
+            .save_image(&note.id, b"used image", "png")
+            .expect("save used image");
+        let unused_image = store
+            .save_image(&note.id, b"unused image", "png")
+            .expect("save unused image");
+        let content = format!(
+            "正文\n![]({used_image})\n![missing](images/{}/missing.png)",
+            note.id
+        );
+        store
+            .update_note(
+                &note.id,
+                SaveNoteRequest {
+                    title: note.title,
+                    content: content.clone(),
+                    category: String::new(),
+                },
+            )
+            .expect("update note");
+        let export_path = root.join("exports").join("带图.md");
+
+        store
+            .export_markdown_file(&note.id, &export_path)
+            .expect("export markdown");
+
+        assert_eq!(
+            fs::read_to_string(&export_path).expect("read exported markdown"),
+            content
+        );
+        let used_file_name = used_image.rsplit('/').next().expect("used image file name");
+        let unused_file_name = unused_image
+            .rsplit('/')
+            .next()
+            .expect("unused image file name");
+        assert_eq!(
+            fs::read(
+                root.join("exports")
+                    .join("images")
+                    .join(&note.id)
+                    .join(used_file_name)
+            )
+            .expect("read exported image"),
+            b"used image"
+        );
+        assert!(!root
+            .join("exports")
+            .join("images")
+            .join(&note.id)
+            .join(unused_file_name)
+            .exists());
+        assert!(!root
+            .join("exports")
+            .join("images")
+            .join(&note.id)
+            .join("missing.png")
+            .exists());
     }
 }

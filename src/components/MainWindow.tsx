@@ -755,6 +755,7 @@ export function MainWindow({
     try {
       const category = selectedNote?.category ?? "";
       const note = await updateNote(selectedId, { title, content, category });
+      await cleanUnusedImages(note.id, note.content).catch(() => undefined);
       replaceNoteMetadata(note);
       setSaveState("saved");
       setErrorMessage(null);

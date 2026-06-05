@@ -36,7 +36,7 @@
     "desktopConfig": "Failed to update desktop configuration",
     "duplicateShortcut": "Show/Hide shortcut cannot be the same as Quick Note shortcut",
     "imagePasteFailed": "Image paste failed",
-    "imageTooLarge": "Image file too large (max 20 MB)",
+    "imageTooLarge": "Image file too large (max 5 MB)",
     "noPool": "Notepad window pool not yet initialized",
     "noteNotFound": "Note not found",
     "unsupportedFile": "Only .md files are supported",
@@ -175,7 +175,8 @@
     "tab": {
       "edit": "Edit",
       "new": "New",
-      "open": "Open"
+      "open": "Open",
+      "preview": "Preview"
     },
     "tooltip": {
       "close": "Close",

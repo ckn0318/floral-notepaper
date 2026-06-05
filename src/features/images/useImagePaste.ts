@@ -2,16 +2,10 @@ import { useCallback, useRef } from "react";
 import type { TFunction } from "i18next";
 import { saveImage } from "./api";
 
-const MAX_IMAGE_SIZE = 20 * 1024 * 1024; // 20 MB
+const MAX_IMAGE_SIZE = 5 * 1024 * 1024; // 5 MB
 
-const MIME_TO_EXT: Record<string, string> = {
-  "image/png": "png",
-  "image/jpeg": "jpg",
-  "image/gif": "gif",
-  "image/webp": "webp",
-  "image/bmp": "bmp",
-  "image/svg+xml": "svg",
-};
+const SUPPORTED_IMAGE_TYPES = new Set(["image/png", "image/jpeg"]);
+const SUPPORTED_IMAGE_EXTENSIONS = new Set(["png", "jpg", "jpeg"]);
 
 interface UseImagePasteOptions {
   noteId: string | null;
@@ -24,20 +18,40 @@ interface UseImagePasteOptions {
   t?: TFunction;
 }
 
+async function imageFileToPngData(file: File): Promise<number[]> {
+  if (file.type === "image/png") {
+    return Array.from(new Uint8Array(await file.arrayBuffer()));
+  }
+
+  const bitmap = await createImageBitmap(file);
+  try {
+    const canvas = document.createElement("canvas");
+    canvas.width = bitmap.width;
+    canvas.height = bitmap.height;
+    const context = canvas.getContext("2d");
+    if (!context) throw new Error("canvas context unavailable");
+    context.drawImage(bitmap, 0, 0);
+
+    const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/png"));
+    if (!blob) throw new Error("png conversion failed");
+    return Array.from(new Uint8Array(await blob.arrayBuffer()));
+  } finally {
+    bitmap.close();
+  }
+}
+
 async function processImageFile(file: File, noteId: string, t?: TFunction): Promise<string | null> {
   if (file.size > MAX_IMAGE_SIZE) {
     throw new Error(
-      t?.("errors.imageTooLarge", { defaultValue: "图片文件过大（上限 20 MB）" }) ??
-        "图片文件过大（上限 20 MB）",
+      t?.("errors.imageTooLarge", { defaultValue: "图片文件过大（上限 5 MB）" }) ??
+        "图片文件过大（上限 5 MB）",
     );
   }
 
-  const ext = MIME_TO_EXT[file.type];
-  if (!ext) return null;
+  if (!isSupportedImageFile(file)) return null;
 
-  const buffer = await file.arrayBuffer();
-  const data = Array.from(new Uint8Array(buffer));
-  return saveImage(noteId, data, ext);
+  const data = await imageFileToPngData(file);
+  return saveImage(noteId, data, "png");
 }
 
 function insertTextAtCursor(
@@ -64,12 +78,18 @@ function getImageFiles(dataTransfer: DataTransfer): File[] {
   const files: File[] = [];
   for (let i = 0; i < dataTransfer.items.length; i++) {
     const item = dataTransfer.items[i];
-    if (item.kind === "file" && item.type in MIME_TO_EXT) {
+    if (item.kind === "file") {
       const file = item.getAsFile();
-      if (file) files.push(file);
+      if (file && isSupportedImageFile(file)) files.push(file);
     }
   }
   return files;
+}
+
+function isSupportedImageFile(file: File): boolean {
+  if (SUPPORTED_IMAGE_TYPES.has(file.type)) return true;
+  const extension = file.name.split(".").pop()?.toLowerCase() ?? "";
+  return SUPPORTED_IMAGE_EXTENSIONS.has(extension);
 }
 
 export function useImagePaste({
@@ -99,16 +119,9 @@ export function useImagePaste({
         const textarea = textareaRef.current;
         if (!textarea) return;
 
-        const markdownLines: string[] = [];
-        for (const file of files) {
-          const relativePath = await processImageFile(file, resolvedId, t);
-          if (relativePath) {
-            markdownLines.push(`![](${relativePath})`);
-          }
-        }
-
-        if (markdownLines.length > 0) {
-          insertTextAtCursor(textarea, setContent, markdownLines.join("\n"));
+        const relativePath = await processImageFile(files[0], resolvedId, t);
+        if (relativePath) {
+          insertTextAtCursor(textarea, setContent, `![](${relativePath})`);
           markDirty();
         }
       } catch (error) {
@@ -150,7 +163,7 @@ export function useImagePaste({
     (event: React.DragEvent<HTMLTextAreaElement>) => {
       if (disabled) return;
       const hasImage = Array.from(event.dataTransfer.items).some(
-        (item) => item.kind === "file" && item.type in MIME_TO_EXT,
+        (item) => item.kind === "file" && SUPPORTED_IMAGE_TYPES.has(item.type),
       );
       if (hasImage) {
         event.preventDefault();

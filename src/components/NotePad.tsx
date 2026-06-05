@@ -3,6 +3,7 @@ import type { MouseEvent } from "react";
 import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { createNote, getErrorMessage, getNote, listNotes, updateNote } from "../features/notes/api";
+import { cleanUnusedImages } from "../features/images/api";
 import { useImagePaste } from "../features/images/useImagePaste";
 import { useImageBaseDir } from "../features/images/useImageBaseDir";
 import type { Note, NoteMetadata } from "../features/notes/types";
@@ -14,6 +15,7 @@ import {
 } from "../features/notes/noteUtils";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { MarkdownPreview } from "../features/markdown/MarkdownPreview";
 import {
   animateCurrentWindowBounds,
   closeCurrentWindow,
@@ -52,6 +54,8 @@ import { Tile } from "./Tile";
 
 type OpenMode = "new" | "open";
 type NotePadStatus = "empty" | "opened" | "saved" | "dirty" | "saveFailed" | "copied";
+
+const EXPANDED_PREVIEW_MIN_WIDTH = 560;
 
 interface NotePadProps {
   initialNoteId?: string;
@@ -128,6 +132,7 @@ export function NotePad({
   const [tileColorMode, setTileColorMode] = useState<TileColorMode>("system");
   const [surfaceFontSize, setSurfaceFontSize] = useState(14);
   const [tileRenderMarkdown, setTileRenderMarkdown] = useState(false);
+  const [isExpandedPreview, setIsExpandedPreview] = useState(false);
   const [tileColor, setTileColor] = useState(() =>
     resolveTileColor("system", normalizeTileColor(initialTileColor)),
   );
@@ -158,6 +163,16 @@ export function NotePad({
     }),
     [t],
   );
+
+  useEffect(() => {
+    const updateExpandedPreview = () => {
+      setIsExpandedPreview(window.innerWidth >= EXPANDED_PREVIEW_MIN_WIDTH);
+    };
+
+    updateExpandedPreview();
+    window.addEventListener("resize", updateExpandedPreview);
+    return () => window.removeEventListener("resize", updateExpandedPreview);
+  }, []);
 
   const refreshNotes = useCallback(async () => {
     const loadedNotes = await listNotes();
@@ -301,6 +316,7 @@ export function NotePad({
     const note = editingNoteId
       ? await updateNote(editingNoteId, request)
       : await createNote(request);
+    await cleanUnusedImages(note.id, note.content).catch(() => undefined);
 
     setEditingNoteId(note.id);
     setNotes((current) => {
@@ -313,7 +329,7 @@ export function NotePad({
     });
     setStatus("saved");
     return note;
-  }, [content, editingNoteId, title]);
+  }, [content, editingNoteId, notes, title]);
 
   const hasDraftContent = useCallback(
     () => Boolean(editingNoteId || title.trim() || content.trim()),
@@ -486,7 +502,7 @@ export function NotePad({
   }, [copyTileContent, handleClose, handleSave, switchSurfaceMode]);
 
   useEffect(() => {
-    if (!noteSurfaceAutoSave || mode !== "new" || status !== "dirty") {
+    if (!noteSurfaceAutoSave || mode !== "new" || status !== "dirty" || !editingNoteId) {
       return undefined;
     }
     if (!hasDraftContent()) return undefined;
@@ -496,7 +512,7 @@ export function NotePad({
     }, 900);
 
     return () => window.clearTimeout(timer);
-  }, [handleSave, hasDraftContent, mode, noteSurfaceAutoSave, status]);
+  }, [editingNoteId, handleSave, hasDraftContent, mode, noteSurfaceAutoSave, status]);
 
   const handleDrag = (event: MouseEvent<HTMLElement>) => {
     const target = event.target as HTMLElement;
@@ -514,6 +530,7 @@ export function NotePad({
   };
 
   const isTile = surfaceMode === "tile";
+  const isPadPreview = !isTile && isExpandedPreview;
   const tileTitle = title.trim();
   const enterClass = hasEnteredOnce.current ? "" : "animate-window-enter";
   const surfaceWrapperClassName = `w-full h-screen flex flex-col bg-transparent p-0 ${isExiting ? "animate-window-exit" : enterClass}`;
@@ -528,7 +545,7 @@ export function NotePad({
           content={errorMessage || content}
           color={tileColor}
           fontSize={surfaceFontSize}
-          renderMarkdown={!errorMessage && tileRenderMarkdown}
+          renderMarkdown={!errorMessage && (tileRenderMarkdown || isExpandedPreview)}
           imageBaseDir={imageBaseDir ?? undefined}
           width="100%"
           className="h-full cursor-default"
@@ -567,32 +584,41 @@ export function NotePad({
               onMouseDown={handleDrag}
             >
               <div className="flex items-center gap-0.5">
-                <button
-                  onClick={resetDraft}
-                  className={`relative px-3.5 py-1.5 text-[13px] rounded-t-lg transition-all duration-200 cursor-pointer ${
-                    mode === "new"
-                      ? "text-bamboo font-medium"
-                      : "text-ink-ghost hover:text-ink-faint"
-                  }`}
-                >
-                  {editingNoteId ? tabLabels.edit : tabLabels.new}
-                  {mode === "new" && (
+                {isPadPreview ? (
+                  <button className="relative px-3.5 py-1.5 text-[13px] rounded-t-lg transition-all duration-200 text-bamboo font-medium cursor-default">
+                    {t("notepad.tab.preview", { defaultValue: "预览" })}
                     <div className="absolute bottom-0 left-3 right-3 h-[2px] bg-bamboo rounded-full" />
-                  )}
-                </button>
-                <button
-                  onClick={() => setMode("open")}
-                  className={`relative px-3.5 py-1.5 text-[13px] rounded-t-lg transition-all duration-200 cursor-pointer ${
-                    mode === "open"
-                      ? "text-bamboo font-medium"
-                      : "text-ink-ghost hover:text-ink-faint"
-                  }`}
-                >
-                  {tabLabels.open}
-                  {mode === "open" && (
-                    <div className="absolute bottom-0 left-3 right-3 h-[2px] bg-bamboo rounded-full" />
-                  )}
-                </button>
+                  </button>
+                ) : (
+                  <>
+                    <button
+                      onClick={() => setMode("new")}
+                      className={`relative px-3.5 py-1.5 text-[13px] rounded-t-lg transition-all duration-200 cursor-pointer ${
+                        mode === "new"
+                          ? "text-bamboo font-medium"
+                          : "text-ink-ghost hover:text-ink-faint"
+                      }`}
+                    >
+                      {editingNoteId ? tabLabels.edit : tabLabels.new}
+                      {mode === "new" && (
+                        <div className="absolute bottom-0 left-3 right-3 h-[2px] bg-bamboo rounded-full" />
+                      )}
+                    </button>
+                    <button
+                      onClick={() => setMode("open")}
+                      className={`relative px-3.5 py-1.5 text-[13px] rounded-t-lg transition-all duration-200 cursor-pointer ${
+                        mode === "open"
+                          ? "text-bamboo font-medium"
+                          : "text-ink-ghost hover:text-ink-faint"
+                      }`}
+                    >
+                      {tabLabels.open}
+                      {mode === "open" && (
+                        <div className="absolute bottom-0 left-3 right-3 h-[2px] bg-bamboo rounded-full" />
+                      )}
+                    </button>
+                  </>
+                )}
               </div>
 
               <div className="flex items-center gap-1.5">
@@ -638,7 +664,19 @@ export function NotePad({
 
             <div className="mx-4 mt-1 h-px bg-paper-deep/50" />
 
-            {mode === "new" ? (
+            {isPadPreview ? (
+              <div
+                data-pad-preview-body="true"
+                className="px-5 pt-4 pb-4 flex-1 min-h-0 overflow-y-auto text-ink-soft"
+              >
+                <MarkdownPreview
+                  content={errorMessage || content}
+                  fontSize={surfaceFontSize}
+                  renderHtml={false}
+                  imageBaseDir={imageBaseDir ?? undefined}
+                />
+              </div>
+            ) : mode === "new" ? (
               <div
                 data-pad-editor-body="true"
                 className="px-4 pt-3 pb-2 flex flex-col flex-1 min-h-0"

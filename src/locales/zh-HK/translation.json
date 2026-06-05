@@ -36,7 +36,7 @@
     "desktopConfig": "桌面配置更新失敗",
     "duplicateShortcut": "顯示／隱藏視窗快捷鍵不能與呼出小窗快捷鍵重複",
     "imagePasteFailed": "圖片貼上失敗",
-    "imageTooLarge": "圖片檔案過大（上限 20 MB）",
+    "imageTooLarge": "圖片檔案過大（上限 5 MB）",
     "noPool": "便箋視窗池尚未初始化",
     "noteNotFound": "找不到該筆記",
     "unsupportedFile": "僅支援匯入 .md 檔案",
@@ -175,7 +175,8 @@
     "tab": {
       "edit": "編輯",
       "new": "新增",
-      "open": "開啟"
+      "open": "開啟",
+      "preview": "預覽"
     },
     "tooltip": {
       "close": "關閉",
