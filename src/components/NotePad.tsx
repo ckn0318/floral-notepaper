@@ -53,9 +53,8 @@ import {
 import { Tile } from "./Tile";
 
 type OpenMode = "new" | "open";
+type PadViewMode = "edit" | "preview";
 type NotePadStatus = "empty" | "opened" | "saved" | "dirty" | "saveFailed" | "copied";
-
-const EXPANDED_PREVIEW_MIN_WIDTH = 560;
 
 interface NotePadProps {
   initialNoteId?: string;
@@ -132,7 +131,7 @@ export function NotePad({
   const [tileColorMode, setTileColorMode] = useState<TileColorMode>("system");
   const [surfaceFontSize, setSurfaceFontSize] = useState(14);
   const [tileRenderMarkdown, setTileRenderMarkdown] = useState(false);
-  const [isExpandedPreview, setIsExpandedPreview] = useState(false);
+  const [padViewMode, setPadViewMode] = useState<PadViewMode>("edit");
   const [tileColor, setTileColor] = useState(() =>
     resolveTileColor("system", normalizeTileColor(initialTileColor)),
   );
@@ -164,16 +163,6 @@ export function NotePad({
     [t],
   );
 
-  useEffect(() => {
-    const updateExpandedPreview = () => {
-      setIsExpandedPreview(window.innerWidth >= EXPANDED_PREVIEW_MIN_WIDTH);
-    };
-
-    updateExpandedPreview();
-    window.addEventListener("resize", updateExpandedPreview);
-    return () => window.removeEventListener("resize", updateExpandedPreview);
-  }, []);
-
   const refreshNotes = useCallback(async () => {
     const loadedNotes = await listNotes();
     setNotes(loadedNotes);
@@ -185,6 +174,7 @@ export function NotePad({
     setTitle(note.title);
     setContent(note.content);
     setMode("new");
+    setPadViewMode("edit");
     setStatus("opened");
   }, []);
 
@@ -296,6 +286,7 @@ export function NotePad({
       setTitle("");
       setContent("");
       setMode("new");
+      setPadViewMode("edit");
       setStatus("empty");
       setErrorMessage(null);
       setIsExiting(false);
@@ -525,17 +516,44 @@ export function NotePad({
     setTitle("");
     setContent("");
     setMode("new");
+    setPadViewMode("edit");
     setStatus("empty");
     setErrorMessage(null);
   };
 
   const isTile = surfaceMode === "tile";
-  const isPadPreview = !isTile && isExpandedPreview;
+  const isPadPreview = mode === "new" && padViewMode === "preview";
   const tileTitle = title.trim();
   const enterClass = hasEnteredOnce.current ? "" : "animate-window-enter";
   const surfaceWrapperClassName = `w-full h-screen flex flex-col bg-transparent p-0 ${isExiting ? "animate-window-exit" : enterClass}`;
   const padSurfaceClassName =
     "app-surface-frame relative noise-bg w-full h-full min-h-0 bg-cloud overflow-hidden flex flex-col flex-1 border border-paper-deep/70 shadow-[0_1px_10px_rgba(26,26,24,0.06)] transition-all duration-200 ease-out";
+  const padViewToggle = (
+    <div className="flex shrink-0 items-center rounded-lg bg-paper-warm/55 p-0.5 border border-paper-deep/25">
+      <button
+        type="button"
+        onClick={() => setPadViewMode("edit")}
+        className={`px-3 py-1 text-[11px] rounded-md transition-all duration-200 cursor-pointer ${
+          padViewMode === "edit"
+            ? "bg-bamboo text-cloud shadow-sm"
+            : "text-ink-ghost hover:text-ink-soft"
+        }`}
+      >
+        {tabLabels.edit}
+      </button>
+      <button
+        type="button"
+        onClick={() => setPadViewMode("preview")}
+        className={`px-3 py-1 text-[11px] rounded-md transition-all duration-200 cursor-pointer ${
+          padViewMode === "preview"
+            ? "bg-bamboo text-cloud shadow-sm"
+            : "text-ink-ghost hover:text-ink-soft"
+        }`}
+      >
+        {t("notepad.tab.preview", { defaultValue: "Preview" })}
+      </button>
+    </div>
+  );
 
   return (
     <div className={surfaceWrapperClassName}>
@@ -545,7 +563,7 @@ export function NotePad({
           content={errorMessage || content}
           color={tileColor}
           fontSize={surfaceFontSize}
-          renderMarkdown={!errorMessage && (tileRenderMarkdown || isExpandedPreview)}
+          renderMarkdown={!errorMessage && tileRenderMarkdown}
           imageBaseDir={imageBaseDir ?? undefined}
           width="100%"
           className="h-full cursor-default"
@@ -584,41 +602,32 @@ export function NotePad({
               onMouseDown={handleDrag}
             >
               <div className="flex items-center gap-0.5">
-                {isPadPreview ? (
-                  <button className="relative px-3.5 py-1.5 text-[13px] rounded-t-lg transition-all duration-200 text-bamboo font-medium cursor-default">
-                    {t("notepad.tab.preview", { defaultValue: "预览" })}
+                <button
+                  onClick={() => setMode("new")}
+                  className={`relative px-3.5 py-1.5 text-[13px] rounded-t-lg transition-all duration-200 cursor-pointer ${
+                    mode === "new"
+                      ? "text-bamboo font-medium"
+                      : "text-ink-ghost hover:text-ink-faint"
+                  }`}
+                >
+                  {editingNoteId ? tabLabels.edit : tabLabels.new}
+                  {mode === "new" && (
                     <div className="absolute bottom-0 left-3 right-3 h-[2px] bg-bamboo rounded-full" />
-                  </button>
-                ) : (
-                  <>
-                    <button
-                      onClick={() => setMode("new")}
-                      className={`relative px-3.5 py-1.5 text-[13px] rounded-t-lg transition-all duration-200 cursor-pointer ${
-                        mode === "new"
-                          ? "text-bamboo font-medium"
-                          : "text-ink-ghost hover:text-ink-faint"
-                      }`}
-                    >
-                      {editingNoteId ? tabLabels.edit : tabLabels.new}
-                      {mode === "new" && (
-                        <div className="absolute bottom-0 left-3 right-3 h-[2px] bg-bamboo rounded-full" />
-                      )}
-                    </button>
-                    <button
-                      onClick={() => setMode("open")}
-                      className={`relative px-3.5 py-1.5 text-[13px] rounded-t-lg transition-all duration-200 cursor-pointer ${
-                        mode === "open"
-                          ? "text-bamboo font-medium"
-                          : "text-ink-ghost hover:text-ink-faint"
-                      }`}
-                    >
-                      {tabLabels.open}
-                      {mode === "open" && (
-                        <div className="absolute bottom-0 left-3 right-3 h-[2px] bg-bamboo rounded-full" />
-                      )}
-                    </button>
-                  </>
-                )}
+                  )}
+                </button>
+                <button
+                  onClick={() => setMode("open")}
+                  className={`relative px-3.5 py-1.5 text-[13px] rounded-t-lg transition-all duration-200 cursor-pointer ${
+                    mode === "open"
+                      ? "text-bamboo font-medium"
+                      : "text-ink-ghost hover:text-ink-faint"
+                  }`}
+                >
+                  {tabLabels.open}
+                  {mode === "open" && (
+                    <div className="absolute bottom-0 left-3 right-3 h-[2px] bg-bamboo rounded-full" />
+                  )}
+                </button>
               </div>
 
               <div className="flex items-center gap-1.5">
@@ -667,14 +676,37 @@ export function NotePad({
             {isPadPreview ? (
               <div
                 data-pad-preview-body="true"
-                className="px-5 pt-4 pb-4 flex-1 min-h-0 overflow-y-auto text-ink-soft"
+                className="px-4 pt-3 pb-2 flex flex-col flex-1 min-h-0 text-ink-soft"
               >
-                <MarkdownPreview
-                  content={errorMessage || content}
-                  fontSize={surfaceFontSize}
-                  renderHtml={false}
-                  imageBaseDir={imageBaseDir ?? undefined}
-                />
+                <div className="flex-1 min-h-0 overflow-y-auto pb-2">
+                  <MarkdownPreview
+                    content={errorMessage || content}
+                    fontSize={surfaceFontSize}
+                    renderHtml={false}
+                    imageBaseDir={imageBaseDir ?? undefined}
+                  />
+                </div>
+                <div className="flex items-center justify-between gap-2 mt-auto pt-2 border-t border-paper-deep/30 shrink-0">
+                  <span className="text-[11px] text-ink-ghost font-mono tabular-nums truncate min-w-0 flex-1">
+                    {errorMessage ??
+                      `${countNoteChars(content)} ${t("common.wordCountUnit", { defaultValue: "字" })} · ${statusLabel[status]}`}
+                  </span>
+                  {padViewToggle}
+                  <div className="flex shrink-0 items-center gap-2">
+                    <button
+                      onClick={resetDraft}
+                      className="px-4 py-1.5 text-[12px] text-ink-faint hover:text-ink-soft rounded-lg hover:bg-paper-warm transition-all duration-200 cursor-pointer"
+                    >
+                      {t("notepad.button.clear", { defaultValue: "清空" })}
+                    </button>
+                    <button
+                      onClick={() => void handleSave()}
+                      className="px-4 py-1.5 text-[12px] text-cloud bg-bamboo hover:bg-bamboo-light rounded-lg transition-all duration-200 font-medium cursor-pointer"
+                    >
+                      {t("common.save", { defaultValue: "保存" })}
+                    </button>
+                  </div>
+                </div>
               </div>
             ) : mode === "new" ? (
               <div
@@ -728,12 +760,13 @@ export function NotePad({
                   style={{ fontSize: `${surfaceFontSize}px`, tabSize: `var(--tab-indent-size, 2)` }}
                 />
 
-                <div className="flex items-center justify-between mt-auto pt-2 border-t border-paper-deep/30 shrink-0">
-                  <span className="text-[11px] text-ink-ghost font-mono tabular-nums truncate max-w-[170px]">
+                <div className="flex items-center justify-between gap-2 mt-auto pt-2 border-t border-paper-deep/30 shrink-0">
+                  <span className="text-[11px] text-ink-ghost font-mono tabular-nums truncate min-w-0 flex-1">
                     {errorMessage ??
                       `${countNoteChars(content)} ${t("common.wordCountUnit", { defaultValue: "字" })} · ${statusLabel[status]}`}
                   </span>
-                  <div className="flex items-center gap-2">
+                  {padViewToggle}
+                  <div className="flex shrink-0 items-center gap-2">
                     <button
                       onClick={resetDraft}
                       className="px-4 py-1.5 text-[12px] text-ink-faint hover:text-ink-soft rounded-lg hover:bg-paper-warm transition-all duration-200 cursor-pointer"
