@@ -1,8 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { MouseEvent } from "react";
+import type { MouseEvent, WheelEvent } from "react";
 import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
-import { createNote, getErrorMessage, getNote, listNotes, updateNote } from "../features/notes/api";
+import {
+  createNote,
+  deleteNote,
+  getErrorMessage,
+  getNote,
+  listNotes,
+  updateNote,
+} from "../features/notes/api";
 import { useImagePaste } from "../features/images/useImagePaste";
 import { useImageBaseDir } from "../features/images/useImageBaseDir";
 import type { Note, NoteMetadata } from "../features/notes/types";
@@ -24,18 +31,17 @@ import {
   startCurrentWindowDrag,
   startCurrentWindowResize,
 } from "../features/windows/controls";
-import { openNoteInEditor } from "../features/windows/api";
 import type { ResizeDirection } from "../features/windows/controls";
-import { getConfig } from "../features/settings/api";
+import { getConfig, saveConfig } from "../features/settings/api";
 import {
   DEFAULT_TILE_COLOR,
   normalizeTileColor,
   resolveTileColor,
 } from "../features/settings/tileColor";
-import type { TileColorMode } from "../features/settings/types";
-import { shouldSaveBeforeSwitchingToTile } from "../features/windows/noteSurfaceSavePolicy";
+import type { AppConfig, TileColorMode } from "../features/settings/types";
 import {
   NOTE_SURFACE_ACTION_EVENT,
+  type NoteSurfaceAction,
   surfaceActionFromEvent,
 } from "../features/windows/surfaceActions";
 import {
@@ -53,10 +59,12 @@ import { Tile } from "./Tile";
 type OpenMode = "new" | "open";
 type NotePadStatus = "empty" | "opened" | "saved" | "dirty" | "saveFailed" | "copied";
 
+const SURFACE_FONT_SIZE_MIN = 10;
+const SURFACE_FONT_SIZE_MAX = 25;
+
 interface NotePadProps {
   initialNoteId?: string;
   initialSurfaceMode?: NoteSurfaceMode;
-  initialAutoSave?: boolean;
   initialTileColor?: string;
 }
 
@@ -110,7 +118,6 @@ function SurfaceResizeHandles() {
 export function NotePad({
   initialNoteId,
   initialSurfaceMode = "pad",
-  initialAutoSave = true,
   initialTileColor = DEFAULT_TILE_COLOR,
 }: NotePadProps) {
   const { t } = useTranslation();
@@ -123,10 +130,9 @@ export function NotePad({
   const [hoveredNote, setHoveredNote] = useState<string | null>(null);
   const [status, setStatus] = useState<NotePadStatus>("empty");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [noteSurfaceAutoSave, setNoteSurfaceAutoSave] = useState(initialAutoSave);
   const [tileColorRaw, setTileColorRaw] = useState(normalizeTileColor(initialTileColor));
   const [tileColorMode, setTileColorMode] = useState<TileColorMode>("system");
-  const [surfaceFontSize, setSurfaceFontSize] = useState(14);
+  const [surfaceFontSize, setSurfaceFontSize] = useState(16);
   const [tileRenderMarkdown, setTileRenderMarkdown] = useState(false);
   const [tileColor, setTileColor] = useState(() =>
     resolveTileColor("system", normalizeTileColor(initialTileColor)),
@@ -134,6 +140,7 @@ export function NotePad({
   const [isExiting, setIsExiting] = useState(false);
   const titleRef = useRef<HTMLInputElement>(null);
   const contentRef = useRef<HTMLTextAreaElement>(null);
+  const configRef = useRef<AppConfig | null>(null);
   const isStandby = useRef(
     typeof window !== "undefined" &&
       new URLSearchParams(window.location.search).get("standby") === "1",
@@ -180,8 +187,8 @@ export function NotePad({
       try {
         const [loadedConfig] = await Promise.all([getConfig(), refreshNotes()]);
         if (!cancelled) {
-          setNoteSurfaceAutoSave(loadedConfig.noteSurfaceAutoSave);
-          setSurfaceFontSize(loadedConfig.surfaceFontSize ?? 14);
+          configRef.current = loadedConfig;
+          setSurfaceFontSize(loadedConfig.surfaceFontSize ?? 16);
           setTileRenderMarkdown(loadedConfig.tileRenderMarkdown ?? false);
           setTileColorRaw(normalizeTileColor(loadedConfig.tileColor));
           setTileColorMode(loadedConfig.tileColorMode ?? "system");
@@ -232,12 +239,10 @@ export function NotePad({
   }, []);
 
   useEffect(() => {
-    const unlisten = listen<{
-      tileColor?: string;
-      tileColorMode?: TileColorMode;
-      surfaceFontSize?: number;
-      tileRenderMarkdown?: boolean;
-    }>("config-changed", (event) => {
+    const unlisten = listen<Partial<AppConfig>>("config-changed", (event) => {
+      if (configRef.current) {
+        configRef.current = { ...configRef.current, ...event.payload };
+      }
       const mode = event.payload.tileColorMode ?? tileColorMode;
       const raw = event.payload.tileColor ?? tileColorRaw;
       setTileColorMode(mode);
@@ -315,22 +320,13 @@ export function NotePad({
     return note;
   }, [content, editingNoteId, title]);
 
-  const hasDraftContent = useCallback(
-    () => Boolean(editingNoteId || title.trim() || content.trim()),
-    [content, editingNoteId, title],
-  );
-
   const imageBaseDir = useImageBaseDir();
 
   const ensureNoteSaved = useCallback(async (): Promise<string | null> => {
     if (editingNoteId) return editingNoteId;
-    try {
-      const note = await saveNote();
-      return note.id;
-    } catch {
-      return null;
-    }
-  }, [editingNoteId, saveNote]);
+    setErrorMessage(t("notepad.error.saveBeforeImage", { defaultValue: "请先保存笔记再添加图片" }));
+    return null;
+  }, [editingNoteId, t]);
 
   const {
     handlePaste: imagePasteHandler,
@@ -398,6 +394,36 @@ export function NotePad({
     }
   }, [saveNote]);
 
+  const adjustSurfaceFontSize = useCallback((delta: number) => {
+    setSurfaceFontSize((current) => {
+      const next = Math.min(
+        SURFACE_FONT_SIZE_MAX,
+        Math.max(SURFACE_FONT_SIZE_MIN, current + delta),
+      );
+      if (next === current) return current;
+
+      const config = configRef.current;
+      if (config) {
+        const nextConfig = { ...config, surfaceFontSize: next, fontSize: next };
+        configRef.current = nextConfig;
+        void saveConfig(nextConfig).catch((error) => {
+          setErrorMessage(getErrorMessage(error));
+        });
+      }
+
+      return next;
+    });
+  }, []);
+
+  const handleSurfaceFontWheel = useCallback(
+    (event: WheelEvent<HTMLElement>) => {
+      if (!event.ctrlKey && !event.metaKey) return;
+      event.preventDefault();
+      adjustSurfaceFontSize(event.deltaY < 0 ? 1 : -1);
+    },
+    [adjustSurfaceFontSize],
+  );
+
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
       if ((event.ctrlKey || event.metaKey) && event.key === "s") {
@@ -410,23 +436,32 @@ export function NotePad({
     return () => document.removeEventListener("keydown", handleKeyDown);
   }, [handleSave]);
 
-  const handleOpenNote = async (noteId: string) => {
-    setErrorMessage(null);
-    try {
-      const note = await getNote(noteId);
-      applyNote(note);
-      await switchSurfaceMode("pad");
-    } catch (error) {
-      setErrorMessage(getErrorMessage(error));
-    }
-  };
+  const handleOpenNote = useCallback(
+    async (noteId: string) => {
+      setErrorMessage(null);
+      try {
+        const note = await getNote(noteId);
+        applyNote(note);
+        await switchSurfaceMode("pad");
+      } catch (error) {
+        setErrorMessage(getErrorMessage(error));
+      }
+    },
+    [applyNote, switchSurfaceMode],
+  );
+
+  useEffect(() => {
+    const unlisten = listen<string>("notepad:open-note", (event) => {
+      void handleOpenNote(event.payload);
+    });
+    return () => {
+      void unlisten.then((fn) => fn());
+    };
+  }, [handleOpenNote]);
 
   const handlePin = async () => {
     setErrorMessage(null);
     try {
-      if (shouldSaveBeforeSwitchingToTile(noteSurfaceAutoSave)) {
-        await saveNote();
-      }
       await switchSurfaceMode("tile");
     } catch (error) {
       setErrorMessage(getErrorMessage(error));
@@ -457,8 +492,7 @@ export function NotePad({
   }, [content, t]);
 
   useEffect(() => {
-    function handleSurfaceActionRequest(event: Event) {
-      const action = surfaceActionFromEvent(event);
+    function handleSurfaceAction(action: NoteSurfaceAction) {
       if (!action) return;
 
       if (action === "copy") {
@@ -479,24 +513,21 @@ export function NotePad({
       void switchSurfaceMode("pad");
     }
 
+    function handleSurfaceActionRequest(event: Event) {
+      const action = surfaceActionFromEvent(event);
+      if (action) handleSurfaceAction(action);
+    }
+
+    const unlisten = listen<NoteSurfaceAction>("surface-action", (event) => {
+      handleSurfaceAction(event.payload);
+    });
+
     window.addEventListener(NOTE_SURFACE_ACTION_EVENT, handleSurfaceActionRequest);
     return () => {
       window.removeEventListener(NOTE_SURFACE_ACTION_EVENT, handleSurfaceActionRequest);
+      void unlisten.then((fn) => fn());
     };
   }, [copyTileContent, handleClose, handleSave, switchSurfaceMode]);
-
-  useEffect(() => {
-    if (!noteSurfaceAutoSave || mode !== "new" || status !== "dirty") {
-      return undefined;
-    }
-    if (!hasDraftContent()) return undefined;
-
-    const timer = window.setTimeout(() => {
-      void handleSave();
-    }, 900);
-
-    return () => window.clearTimeout(timer);
-  }, [handleSave, hasDraftContent, mode, noteSurfaceAutoSave, status]);
 
   const handleDrag = (event: MouseEvent<HTMLElement>) => {
     const target = event.target as HTMLElement;
@@ -512,6 +543,22 @@ export function NotePad({
     setStatus("empty");
     setErrorMessage(null);
   };
+
+  const handleDeleteNote = useCallback(
+    async (noteId: string) => {
+      setErrorMessage(null);
+      try {
+        await deleteNote(noteId);
+        setNotes((current) => current.filter((note) => note.id !== noteId));
+        if (editingNoteId === noteId) {
+          resetDraft();
+        }
+      } catch (error) {
+        setErrorMessage(getErrorMessage(error));
+      }
+    },
+    [editingNoteId],
+  );
 
   const isTile = surfaceMode === "tile";
   const tileTitle = title.trim();
@@ -536,6 +583,7 @@ export function NotePad({
           data-context-menu="tile"
           data-note-id={tileNoteId}
           onMouseDown={handleDrag}
+          onWheel={handleSurfaceFontWheel}
         >
           <button
             type="button"
@@ -568,7 +616,7 @@ export function NotePad({
             >
               <div className="flex items-center gap-0.5">
                 <button
-                  onClick={resetDraft}
+                  onClick={() => setMode("new")}
                   className={`relative px-3.5 py-1.5 text-[13px] rounded-t-lg transition-all duration-200 cursor-pointer ${
                     mode === "new"
                       ? "text-bamboo font-medium"
@@ -642,6 +690,7 @@ export function NotePad({
               <div
                 data-pad-editor-body="true"
                 className="px-4 pt-3 pb-2 flex flex-col flex-1 min-h-0"
+                onWheel={handleSurfaceFontWheel}
               >
                 <input
                   ref={titleRef}
@@ -715,47 +764,25 @@ export function NotePad({
               <div className="p-2 flex-1 min-h-0 overflow-y-auto">
                 <div className="space-y-0.5">
                   {notes.map((note) => (
-                    <button
+                    <div
                       key={note.id}
                       onClick={() => void handleOpenNote(note.id)}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter" || event.key === " ") {
+                          event.preventDefault();
+                          void handleOpenNote(note.id);
+                        }
+                      }}
                       onMouseEnter={() => setHoveredNote(note.id)}
                       onMouseLeave={() => setHoveredNote(null)}
-                      className="w-full text-left px-3.5 py-3 rounded-xl transition-all duration-200 cursor-pointer group hover:bg-paper-warm/70"
+                      role="button"
+                      tabIndex={0}
+                      className="relative w-full text-left px-3.5 py-3 pr-32 rounded-xl transition-all duration-200 cursor-pointer group hover:bg-paper-warm/70 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-bamboo/60"
                     >
-                      <div className="flex items-center justify-between mb-0.5">
-                        <span className="text-[13px] font-display font-medium text-ink-soft group-hover:text-ink transition-colors truncate pr-2">
+                      <div className="mb-0.5">
+                        <span className="block text-[13px] font-display font-medium text-ink-soft group-hover:text-ink transition-colors truncate">
                           {getDisplayTitle(note)}
                         </span>
-                        <div className="flex items-center gap-1.5 shrink-0">
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              void openNoteInEditor(note.id);
-                            }}
-                            className="w-6 h-6 flex items-center justify-center rounded-md text-ink-ghost hover:text-bamboo hover:bg-bamboo-mist/50 transition-all duration-200 opacity-0 group-hover:opacity-100 cursor-pointer"
-                            title={t("notepad.tooltip.openInEditor", {
-                              defaultValue: "在编辑器中打开",
-                            })}
-                          >
-                            <svg
-                              width="13"
-                              height="13"
-                              viewBox="0 0 24 24"
-                              fill="none"
-                              stroke="currentColor"
-                              strokeWidth="2"
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                            >
-                              <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
-                              <polyline points="15 3 21 3 21 9" />
-                              <line x1="10" y1="14" x2="21" y2="3" />
-                            </svg>
-                          </button>
-                          <span className="text-[11px] text-ink-ghost font-mono tabular-nums">
-                            {formatShortDate(note.updatedAt)}
-                          </span>
-                        </div>
                       </div>
                       <p className="text-[12px] text-ink-ghost leading-relaxed line-clamp-1 group-hover:text-ink-faint transition-colors">
                         {note.preview || t("common.blankNote", { defaultValue: "空白笔记" })}
@@ -763,7 +790,39 @@ export function NotePad({
                       {hoveredNote === note.id && (
                         <div className="mt-1.5 h-px bg-bamboo/10 transition-all duration-300" />
                       )}
-                    </button>
+                      <span className="absolute right-20 top-3 text-[11px] text-ink-ghost font-mono tabular-nums">
+                        {formatShortDate(note.updatedAt)}
+                      </span>
+                      <button
+                        type="button"
+                        aria-label={t("common.delete", { defaultValue: "删除" })}
+                        title={t("common.delete", { defaultValue: "删除" })}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          void handleDeleteNote(note.id);
+                        }}
+                        onMouseDown={(event) => event.stopPropagation()}
+                        className="absolute right-5 top-1/2 -translate-y-1/2 w-9 h-9 flex items-center justify-center rounded-md text-ink-ghost/80 hover:text-red-400 hover:bg-danger-bg transition-all cursor-pointer"
+                      >
+                        <svg
+                          width="18"
+                          height="18"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="2"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          aria-hidden="true"
+                        >
+                          <path d="M3 6h18" />
+                          <path d="M8 6V4h8v2" />
+                          <path d="M19 6l-1 14H6L5 6" />
+                          <path d="M10 11v5" />
+                          <path d="M14 11v5" />
+                        </svg>
+                      </button>
+                    </div>
                   ))}
                   {notes.length === 0 && (
                     <div className="px-4 py-8 text-center text-[12px] text-ink-ghost">

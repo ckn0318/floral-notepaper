@@ -74,6 +74,10 @@ pub struct AppConfig {
     pub surface_width: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub surface_height: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub surface_x: Option<i32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub surface_y: Option<i32>,
     #[serde(default = "default_toggle_visibility_shortcut")]
     pub toggle_visibility_shortcut: String,
     #[serde(default = "default_open_at_cursor")]
@@ -228,6 +232,23 @@ fn default_base_dir() -> Result<PathBuf, AppError> {
     }
 
     Ok(env::current_dir()?.join("data"))
+}
+
+#[cfg_attr(test, allow(dead_code))]
+fn default_notes_dir() -> Result<PathBuf, AppError> {
+    #[cfg(debug_assertions)]
+    {
+        return Ok(env::current_dir()?.join("notes"));
+    }
+
+    #[cfg(not(debug_assertions))]
+    {
+        if let Some(parent) = env::current_exe()?.parent() {
+            return Ok(parent.join("notes"));
+        }
+
+        Ok(env::current_dir()?.join("notes"))
+    }
 }
 
 fn is_filesystem_root(path: &Path) -> bool {
@@ -734,9 +755,14 @@ impl NoteStore {
     }
 
     fn default_config(&self) -> AppConfig {
+        #[cfg(test)]
+        let notes_dir = self.base_dir.join("notes");
+        #[cfg(not(test))]
+        let notes_dir = default_notes_dir().unwrap_or_else(|_| self.base_dir.join("notes"));
+
         AppConfig {
             locale: default_locale(),
-            notes_dir: self.base_dir.join("notes").to_string_lossy().to_string(),
+            notes_dir: notes_dir.to_string_lossy().to_string(),
             #[cfg(target_os = "macos")]
             global_shortcut: DEFAULT_MACOS_GLOBAL_SHORTCUT.into(),
             #[cfg(not(target_os = "macos"))]
@@ -766,6 +792,8 @@ impl NoteStore {
             render_html_markdown: false,
             surface_width: None,
             surface_height: None,
+            surface_x: None,
+            surface_y: None,
             toggle_visibility_shortcut: default_toggle_visibility_shortcut(),
             open_at_cursor: default_open_at_cursor(),
         }
@@ -1073,15 +1101,15 @@ fn default_tile_color_mode() -> String {
 }
 
 fn default_theme() -> String {
-    "system".into()
+    "dark".into()
 }
 
 fn default_font_size() -> u32 {
-    14
+    16
 }
 
 fn default_surface_font_size() -> u32 {
-    14
+    16
 }
 
 fn default_tab_indent_size() -> u32 {
@@ -1245,7 +1273,7 @@ mod tests {
         assert!(default_config.note_surface_auto_save);
         assert_eq!(default_config.tile_color, "#f6f3ec");
         assert_eq!(default_config.tile_color_mode, "system");
-        assert_eq!(default_config.theme, "system");
+        assert_eq!(default_config.theme, "dark");
         assert_eq!(default_config.locale, "zh-CN");
         assert!(default_config.notes_dir.ends_with("notes"));
 
@@ -1279,6 +1307,8 @@ mod tests {
             render_html_markdown: false,
             surface_width: None,
             surface_height: None,
+            surface_x: None,
+            surface_y: None,
             toggle_visibility_shortcut: String::new(),
             open_at_cursor: true,
         };
@@ -1316,10 +1346,10 @@ mod tests {
         assert!(loaded.note_surface_auto_save);
         assert_eq!(loaded.tile_color, "#f6f3ec");
         assert_eq!(loaded.tile_color_mode, "system");
-        assert_eq!(loaded.theme, "system");
+        assert_eq!(loaded.theme, "dark");
         assert_eq!(loaded.locale, "zh-CN");
-        assert_eq!(loaded.font_size, 14);
-        assert_eq!(loaded.surface_font_size, 14);
+        assert_eq!(loaded.font_size, 16);
+        assert_eq!(loaded.surface_font_size, 16);
     }
 
     #[cfg(target_os = "macos")]

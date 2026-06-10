@@ -36,8 +36,8 @@
 }
 
 :root {
-  --app-window-radius: 14px;
-  --app-surface-radius: 14px;
+  --app-window-radius: 0;
+  --app-surface-radius: 0;
 }
 
 :root[data-theme="dark"] {
@@ -101,6 +101,7 @@ body,
 #root {
   width: 100%;
   height: 100%;
+  background: var(--color-cloud);
 }
 
 body {
@@ -111,7 +112,9 @@ body {
 }
 
 .app-window-shell {
-  background: transparent;
+  border-radius: var(--app-window-radius);
+  background: var(--color-cloud);
+  overflow: hidden;
 }
 
 .app-main-frame {

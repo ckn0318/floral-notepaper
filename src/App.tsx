@@ -1,7 +1,6 @@
 import { useEffect } from "react";
 import "./App.css";
 import { ContextMenuProvider } from "./components/ContextMenu";
-import { MainWindow } from "./components/MainWindow";
 import { NotePad } from "./components/NotePad";
 import { TileShowcase } from "./components/TileShowcase";
 import { tabToIndentListener } from "indent-textarea";
@@ -20,7 +19,7 @@ function App() {
     let cleanup = () => {};
     getConfig()
       .then((config) => {
-        const theme = (config.theme || "system") as ThemeOption;
+        const theme = (config.theme || "dark") as ThemeOption;
         applyTheme(theme);
         cleanup = watchSystemTheme(theme);
         document.documentElement.style.setProperty(
@@ -36,7 +35,7 @@ function App() {
   useEffect(() => {
     let themeCleanup = () => {};
     const unlisten = listen<AppConfig>("config-changed", (event) => {
-      const theme = (event.payload.theme || "system") as ThemeOption;
+      const theme = (event.payload.theme || "dark") as ThemeOption;
       applyTheme(theme);
       themeCleanup();
       themeCleanup = watchSystemTheme(theme);
@@ -80,9 +79,7 @@ function App() {
   return (
     <ContextMenuProvider>
       <div className="app-window-shell h-screen font-body text-ink overflow-hidden">
-        {activeView === "main" ? (
-          <MainWindow />
-        ) : activeView === "notepad" ? (
+        {activeView === "notepad" ? (
           <NotePad initialNoteId={route.noteId} />
         ) : (
           <TileShowcase noteId={route.noteId} />

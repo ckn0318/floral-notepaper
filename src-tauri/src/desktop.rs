@@ -2,7 +2,7 @@ use crate::{
     locales::{self, Locale},
     services::notes::{default_store, AppConfig, AppError},
 };
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use std::{
     error::Error,
     sync::{
@@ -11,413 +11,24 @@ use std::{
     },
 };
 
-#[cfg(target_os = "windows")]
-mod keyboard_hook {
-    use serde::Serialize;
-    use std::sync::{
-        atomic::{AtomicIsize, AtomicU32, AtomicU8, Ordering},
-        Mutex,
-    };
-    use tauri::{AppHandle, Emitter};
-
-    const WH_KEYBOARD_LL: i32 = 13;
-    const WM_KEYDOWN: u32 = 0x0100;
-    const WM_KEYUP: u32 = 0x0101;
-    const WM_SYSKEYDOWN: u32 = 0x0104;
-    const WM_SYSKEYUP: u32 = 0x0105;
-    const WM_QUIT: u32 = 0x0012;
-    const WM_HOOK_KEY: u32 = 0x0400 + 1;
-
-    const MOD_CTRL: u8 = 1;
-    const MOD_ALT: u8 = 2;
-    const MOD_SHIFT: u8 = 4;
-    const MOD_META: u8 = 8;
-
-    #[repr(C)]
-    #[allow(clippy::upper_case_acronyms)]
-    struct KBDLLHOOKSTRUCT {
-        vk_code: u32,
-        scan_code: u32,
-        flags: u32,
-        time: u32,
-        dw_extra_info: usize,
-    }
-
-    #[repr(C)]
-    #[allow(clippy::upper_case_acronyms)]
-    struct MSG {
-        hwnd: isize,
-        message: u32,
-        w_param: usize,
-        l_param: isize,
-        time: u32,
-        pt_x: i32,
-        pt_y: i32,
-    }
-
-    #[allow(clippy::upper_case_acronyms)]
-    type HOOKPROC = extern "system" fn(i32, usize, isize) -> isize;
-
-    extern "system" {
-        fn SetWindowsHookExW(id_hook: i32, lpfn: HOOKPROC, hmod: isize, dw_thread_id: u32)
-            -> isize;
-        fn UnhookWindowsHookEx(hhk: isize) -> i32;
-        fn CallNextHookEx(hhk: isize, n_code: i32, w_param: usize, l_param: isize) -> isize;
-        fn GetMessageW(
-            lp_msg: *mut MSG,
-            hwnd: isize,
-            msg_filter_min: u32,
-            msg_filter_max: u32,
-        ) -> i32;
-        fn PostThreadMessageW(id_thread: u32, msg: u32, w_param: usize, l_param: isize) -> i32;
-        fn GetCurrentThreadId() -> u32;
-        fn GetModuleHandleW(lp_module_name: *const u16) -> isize;
-    }
-
-    #[link(name = "imm32")]
-    extern "system" {
-        fn ImmGetHotKey(
-            dw_hot_key_id: u32,
-            lpu_modifiers: *mut u32,
-            lpu_vkey: *mut u32,
-            phkl: *mut isize,
-        ) -> i32;
-        fn ImmSetHotKey(dw_hot_key_id: u32, u_modifiers: u32, u_vkey: u32, hkl: isize) -> i32;
-    }
-
-    static HOOK_HANDLE: AtomicIsize = AtomicIsize::new(0);
-    static HOOK_THREAD_ID: AtomicU32 = AtomicU32::new(0);
-    static HOOK_MODS: AtomicU8 = AtomicU8::new(0);
-    static HOOK_APP: Mutex<Option<AppHandle>> = Mutex::new(None);
-    static HOOK_THREAD: Mutex<Option<std::thread::JoinHandle<()>>> = Mutex::new(None);
-    static SAVED_IME_HOTKEYS: Mutex<Vec<(u32, u32, u32, isize)>> = Mutex::new(Vec::new());
-
-    #[derive(Debug, Clone, Serialize)]
-    #[serde(rename_all = "camelCase")]
-    struct HookKeyEvent {
-        key: String,
-        ctrl: bool,
-        alt: bool,
-        shift: bool,
-        meta: bool,
-    }
-
-    fn is_modifier_vk(vk: u32) -> bool {
-        matches!(
-            vk,
-            0x10 | 0x11 | 0x12 | 0xA0 | 0xA1 | 0xA2 | 0xA3 | 0xA4 | 0xA5 | 0x5B | 0x5C
-        )
-    }
-
-    fn update_modifier_state(vk: u32, pressed: bool) {
-        let bit = match vk {
-            0x10 | 0xA0 | 0xA1 => MOD_SHIFT,
-            0x11 | 0xA2 | 0xA3 => MOD_CTRL,
-            0x12 | 0xA4 | 0xA5 => MOD_ALT,
-            0x5B | 0x5C => MOD_META,
-            _ => return,
-        };
-        if pressed {
-            HOOK_MODS.fetch_or(bit, Ordering::SeqCst);
-        } else {
-            HOOK_MODS.fetch_and(!bit, Ordering::SeqCst);
-        }
-    }
-
-    fn vk_to_key_name(vk: u32) -> Option<&'static str> {
-        Some(match vk {
-            0x41 => "A",
-            0x42 => "B",
-            0x43 => "C",
-            0x44 => "D",
-            0x45 => "E",
-            0x46 => "F",
-            0x47 => "G",
-            0x48 => "H",
-            0x49 => "I",
-            0x4A => "J",
-            0x4B => "K",
-            0x4C => "L",
-            0x4D => "M",
-            0x4E => "N",
-            0x4F => "O",
-            0x50 => "P",
-            0x51 => "Q",
-            0x52 => "R",
-            0x53 => "S",
-            0x54 => "T",
-            0x55 => "U",
-            0x56 => "V",
-            0x57 => "W",
-            0x58 => "X",
-            0x59 => "Y",
-            0x5A => "Z",
-            0x30 => "0",
-            0x31 => "1",
-            0x32 => "2",
-            0x33 => "3",
-            0x34 => "4",
-            0x35 => "5",
-            0x36 => "6",
-            0x37 => "7",
-            0x38 => "8",
-            0x39 => "9",
-            0x70 => "F1",
-            0x71 => "F2",
-            0x72 => "F3",
-            0x73 => "F4",
-            0x74 => "F5",
-            0x75 => "F6",
-            0x76 => "F7",
-            0x77 => "F8",
-            0x78 => "F9",
-            0x79 => "F10",
-            0x7A => "F11",
-            0x7B => "F12",
-            0x20 => "Space",
-            0x09 => "Tab",
-            0x0D => "Enter",
-            0x08 => "Backspace",
-            0x2E => "Delete",
-            0x1B => "Escape",
-            0x26 => "ArrowUp",
-            0x28 => "ArrowDown",
-            0x25 => "ArrowLeft",
-            0x27 => "ArrowRight",
-            0x24 => "Home",
-            0x23 => "End",
-            0x21 => "PageUp",
-            0x22 => "PageDown",
-            0x2D => "Insert",
-            0x60 => "Numpad0",
-            0x61 => "Numpad1",
-            0x62 => "Numpad2",
-            0x63 => "Numpad3",
-            0x64 => "Numpad4",
-            0x65 => "Numpad5",
-            0x66 => "Numpad6",
-            0x67 => "Numpad7",
-            0x68 => "Numpad8",
-            0x69 => "Numpad9",
-            0x6A => "NumpadMultiply",
-            0x6B => "NumpadAdd",
-            0x6D => "NumpadSubtract",
-            0x6E => "NumpadDecimal",
-            0x6F => "NumpadDivide",
-            0xBA => ";",
-            0xBB => "=",
-            0xBC => ",",
-            0xBD => "-",
-            0xBE => ".",
-            0xBF => "/",
-            0xC0 => "`",
-            0xDB => "[",
-            0xDC => "\\",
-            0xDD => "]",
-            0xDE => "'",
-            _ => return None,
-        })
-    }
-
-    // hook_proc must return ASAP to avoid Windows removing the hook (200ms timeout).
-    // We only do atomic reads + PostThreadMessageW here; Tauri event emission
-    // happens in the message-pump thread which has no timeout constraint.
-    extern "system" fn hook_proc(n_code: i32, w_param: usize, l_param: isize) -> isize {
-        if n_code >= 0 {
-            let kb = unsafe { &*(l_param as *const KBDLLHOOKSTRUCT) };
-            let vk = kb.vk_code;
-
-            match w_param as u32 {
-                WM_KEYDOWN | WM_SYSKEYDOWN => {
-                    if is_modifier_vk(vk) {
-                        update_modifier_state(vk, true);
-                    } else {
-                        let mods = HOOK_MODS.load(Ordering::SeqCst);
-                        let tid = HOOK_THREAD_ID.load(Ordering::SeqCst);
-                        if tid != 0 {
-                            unsafe {
-                                PostThreadMessageW(
-                                    tid,
-                                    WM_HOOK_KEY,
-                                    (vk as usize) | ((mods as usize) << 16),
-                                    0,
-                                );
-                            }
-                        }
-                        return 1;
-                    }
-                }
-                WM_KEYUP | WM_SYSKEYUP => {
-                    if is_modifier_vk(vk) {
-                        update_modifier_state(vk, false);
-                    } else {
-                        return 1;
-                    }
-                }
-                _ => {}
-            }
-        }
-
-        unsafe { CallNextHookEx(HOOK_HANDLE.load(Ordering::SeqCst), n_code, w_param, l_param) }
-    }
-
-    fn emit_from_message(w_param: usize) {
-        let vk = (w_param & 0xFFFF) as u32;
-        let mods = ((w_param >> 16) & 0xFF) as u8;
-        if let Some(key_name) = vk_to_key_name(vk) {
-            let event = HookKeyEvent {
-                key: key_name.to_string(),
-                ctrl: mods & MOD_CTRL != 0,
-                alt: mods & MOD_ALT != 0,
-                shift: mods & MOD_SHIFT != 0,
-                meta: mods & MOD_META != 0,
-            };
-            if let Ok(guard) = HOOK_APP.lock() {
-                if let Some(app) = guard.as_ref() {
-                    let _ = app.emit("shortcut-hook-key", &event);
-                }
-            }
-        }
-    }
-
-    const IME_HOTKEY_IDS: &[u32] = &[
-        0x10, // IME_CHOTKEY_IME_NONIME_TOGGLE  (Ctrl+Space)
-        0x11, // IME_CHOTKEY_SHAPE_TOGGLE        (Shift+Space)
-        0x12, // IME_CHOTKEY_SYMBOL_TOGGLE       (Ctrl+.)
-        0x30, // IME_JHOTKEY_CLOSE_OPEN
-        0x50, // IME_KHOTKEY_SHAPE_TOGGLE
-        0x51, // IME_KHOTKEY_HANJACONVERT
-        0x52, // IME_KHOTKEY_ENGLISH
-        0x70, // IME_THOTKEY_IME_NONIME_TOGGLE
-        0x71, // IME_THOTKEY_SHAPE_TOGGLE
-        0x72, // IME_THOTKEY_SYMBOL_TOGGLE
-    ];
-
-    fn disable_ime_hotkeys() {
-        let mut saved = Vec::new();
-        for &id in IME_HOTKEY_IDS {
-            let mut modifiers = 0u32;
-            let mut vkey = 0u32;
-            let mut hkl: isize = 0;
-            if unsafe { ImmGetHotKey(id, &mut modifiers, &mut vkey, &mut hkl) } != 0 {
-                saved.push((id, modifiers, vkey, hkl));
-                unsafe {
-                    ImmSetHotKey(id, 0, 0, 0);
-                }
-            }
-        }
-        if let Ok(mut guard) = SAVED_IME_HOTKEYS.lock() {
-            *guard = saved;
-        }
-    }
-
-    fn restore_ime_hotkeys() {
-        if let Ok(mut guard) = SAVED_IME_HOTKEYS.lock() {
-            for &(id, modifiers, vkey, hkl) in guard.iter() {
-                unsafe {
-                    ImmSetHotKey(id, modifiers, vkey, hkl);
-                }
-            }
-            guard.clear();
-        }
-    }
-
-    pub fn start(app: AppHandle) {
-        stop();
-        disable_ime_hotkeys();
-
-        if let Ok(mut guard) = HOOK_APP.lock() {
-            *guard = Some(app);
-        }
-        HOOK_MODS.store(0, Ordering::SeqCst);
-
-        let (tx, rx) = std::sync::mpsc::channel();
-
-        let handle = std::thread::spawn(move || {
-            let thread_id = unsafe { GetCurrentThreadId() };
-            let hmod = unsafe { GetModuleHandleW(std::ptr::null()) };
-            let hook = unsafe { SetWindowsHookExW(WH_KEYBOARD_LL, hook_proc, hmod, 0) };
-
-            if hook == 0 {
-                eprintln!("[keyboard_hook] SetWindowsHookExW failed");
-                let _ = tx.send(false);
-                return;
-            }
-
-            HOOK_HANDLE.store(hook, Ordering::SeqCst);
-            HOOK_THREAD_ID.store(thread_id, Ordering::SeqCst);
-            let _ = tx.send(true);
-
-            let mut msg: MSG = unsafe { std::mem::zeroed() };
-            loop {
-                let ret = unsafe { GetMessageW(&mut msg, 0, 0, 0) };
-                if ret <= 0 {
-                    break;
-                }
-                if msg.message == WM_HOOK_KEY {
-                    emit_from_message(msg.w_param);
-                }
-            }
-
-            unsafe {
-                UnhookWindowsHookEx(hook);
-            }
-            HOOK_HANDLE.store(0, Ordering::SeqCst);
-            HOOK_THREAD_ID.store(0, Ordering::SeqCst);
-        });
-
-        match rx.recv() {
-            Ok(true) => {}
-            _ => eprintln!("[keyboard_hook] hook thread failed to start"),
-        }
-
-        if let Ok(mut guard) = HOOK_THREAD.lock() {
-            *guard = Some(handle);
-        }
-    }
-
-    pub fn stop() {
-        let thread_id = HOOK_THREAD_ID.swap(0, Ordering::SeqCst);
-        if thread_id != 0 {
-            unsafe {
-                PostThreadMessageW(thread_id, WM_QUIT, 0, 0);
-            }
-        }
-
-        if let Ok(mut guard) = HOOK_THREAD.lock() {
-            if let Some(handle) = guard.take() {
-                let _ = handle.join();
-            }
-        }
-
-        if let Ok(mut guard) = HOOK_APP.lock() {
-            *guard = None;
-        }
-        HOOK_MODS.store(0, Ordering::SeqCst);
-        restore_ime_hotkeys();
-    }
-}
 use tauri::{
     menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     App, AppHandle, Emitter, Manager, PhysicalPosition, PhysicalSize, WebviewUrl,
     WebviewWindowBuilder, Window, WindowEvent, Wry,
 };
-use uuid::Uuid;
-
 #[cfg(desktop)]
 use tauri_plugin_autostart::{MacosLauncher, ManagerExt as AutostartExt};
 #[cfg(desktop)]
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
 
-const MAIN_WINDOW_LABEL: &str = "main";
-const TRAY_ID: &str = "main-tray";
-const TRAY_SHOW_MAIN_ID: &str = "show-main";
+const NOTEPAD_WINDOW_LABEL: &str = "notepad";
+const TRAY_ID: &str = "notepad-tray";
+const TRAY_SHOW_NOTEPAD_ID: &str = "show-notepad";
 const TRAY_QUICK_NOTE_ID: &str = "quick-note";
 const TRAY_TOGGLE_CLOSE_TO_TRAY_ID: &str = "toggle-close-to-tray";
 const TRAY_TOGGLE_AUTOSTART_ID: &str = "toggle-autostart";
 const TRAY_QUIT_ID: &str = "quit";
-const NOTEPAD_POOL_CAPACITY: usize = 2;
 
 /// Stores the file path passed as a command-line argument on cold start.
 /// The frontend retrieves and clears this value after initialization via
@@ -427,7 +38,7 @@ static STARTUP_FILE: Mutex<Option<String>> = Mutex::new(None);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TrayMenuAction {
-    ShowMain,
+    ShowNotepad,
     QuickNote,
     ToggleCloseToTray,
     ToggleAutostart,
@@ -484,7 +95,7 @@ pub struct DynamicWindowVisualOptions {
     pub transparent: bool,
 }
 
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, serde::Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct ShortcutCheckResult {
     pub available: bool,
@@ -493,7 +104,7 @@ pub struct ShortcutCheckResult {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum MainWindowCloseAction {
+enum ShellCloseAction {
     AllowClose,
     HideToTray,
     ExitApp,
@@ -548,34 +159,6 @@ struct ShortcutBindings {
 enum ShortcutAction {
     OpenNotepad,
     ToggleVisibility,
-}
-
-#[derive(Default)]
-struct NotepadPool {
-    available: Mutex<Vec<String>>,
-}
-
-impl NotepadPool {
-    fn take(&self) -> Option<String> {
-        self.available.lock().ok()?.pop()
-    }
-
-    fn put(&self, label: String) -> bool {
-        if let Ok(mut available) = self.available.lock() {
-            if available.len() < NOTEPAD_POOL_CAPACITY {
-                available.push(label);
-                return true;
-            }
-        }
-        false
-    }
-
-    fn is_below_capacity(&self) -> bool {
-        self.available
-            .lock()
-            .map(|a| a.len() < NOTEPAD_POOL_CAPACITY)
-            .unwrap_or(false)
-    }
 }
 
 impl RuntimeState {
@@ -656,7 +239,7 @@ impl ShortcutBindings {
 
 pub fn tray_menu_action(id: &str) -> Option<TrayMenuAction> {
     match id {
-        TRAY_SHOW_MAIN_ID => Some(TrayMenuAction::ShowMain),
+        TRAY_SHOW_NOTEPAD_ID => Some(TrayMenuAction::ShowNotepad),
         TRAY_QUICK_NOTE_ID => Some(TrayMenuAction::QuickNote),
         TRAY_TOGGLE_CLOSE_TO_TRAY_ID => Some(TrayMenuAction::ToggleCloseToTray),
         TRAY_TOGGLE_AUTOSTART_ID => Some(TrayMenuAction::ToggleAutostart),
@@ -666,21 +249,12 @@ pub fn tray_menu_action(id: &str) -> Option<TrayMenuAction> {
 }
 
 pub fn tray_menu_specs(locale: Locale, close_to_tray: bool, autostart: bool) -> Vec<TrayMenuSpec> {
+    let _ = close_to_tray;
     vec![
-        TrayMenuSpec {
-            id: TRAY_SHOW_MAIN_ID,
-            label: locales::tray_show_main_label(locale),
-            checked: None,
-        },
         TrayMenuSpec {
             id: TRAY_QUICK_NOTE_ID,
             label: locales::tray_quick_note_label(locale),
             checked: None,
-        },
-        TrayMenuSpec {
-            id: TRAY_TOGGLE_CLOSE_TO_TRAY_ID,
-            label: locales::tray_toggle_close_to_tray_label(locale),
-            checked: Some(close_to_tray),
         },
         TrayMenuSpec {
             id: TRAY_TOGGLE_AUTOSTART_ID,
@@ -710,37 +284,21 @@ fn build_tray_menu(app: &AppHandle, config: &AppConfig) -> Result<Menu<Wry>, Box
     let autostart = autostart_enabled(app, config.autostart);
     let specs = tray_menu_specs(locale, config.close_to_tray, autostart);
 
-    let show_main = MenuItem::with_id(app, specs[0].id, specs[0].label, true, None::<&str>)?;
-    let quick_note = MenuItem::with_id(app, specs[1].id, specs[1].label, true, None::<&str>)?;
-    let close_to_tray = CheckMenuItem::with_id(
-        app,
-        specs[2].id,
-        specs[2].label,
-        true,
-        specs[2].checked.unwrap_or(false),
-        None::<&str>,
-    )?;
+    let quick_note = MenuItem::with_id(app, specs[0].id, specs[0].label, true, None::<&str>)?;
     let autostart = CheckMenuItem::with_id(
         app,
-        specs[3].id,
-        specs[3].label,
+        specs[1].id,
+        specs[1].label,
         true,
-        specs[3].checked.unwrap_or(false),
+        specs[1].checked.unwrap_or(false),
         None::<&str>,
     )?;
     let separator = PredefinedMenuItem::separator(app)?;
-    let quit = MenuItem::with_id(app, specs[4].id, specs[4].label, true, None::<&str>)?;
+    let quit = MenuItem::with_id(app, specs[2].id, specs[2].label, true, None::<&str>)?;
 
     Ok(Menu::with_items(
         app,
-        &[
-            &show_main,
-            &quick_note,
-            &close_to_tray,
-            &autostart,
-            &separator,
-            &quit,
-        ],
+        &[&quick_note, &autostart, &separator, &quit],
     )?)
 }
 
@@ -758,12 +316,8 @@ fn refresh_tray_menu(app: &AppHandle, config: &AppConfig) -> Result<(), Box<dyn 
 fn refresh_window_titles(app: &AppHandle, config: &AppConfig) -> Result<(), AppError> {
     let locale = locale_from_config(config);
 
-    if let Some(window) = app.get_webview_window(MAIN_WINDOW_LABEL) {
-        window.set_title(locales::main_window_title(locale))?;
-    }
-
     for (label, window) in app.webview_windows() {
-        if label.starts_with("notepad-") {
+        if is_notepad_window_label(&label) {
             window.set_title(locales::notepad_window_title(locale))?;
         } else if label.starts_with("tile-") {
             window.set_title(locales::tile_window_title(locale))?;
@@ -882,7 +436,7 @@ fn clear_hidden_window_state(app: &AppHandle) {
     };
 
     for label in &labels {
-        if label.starts_with("notepad-") || label.starts_with("tile-") {
+        if is_notepad_window_label(&label) || label.starts_with("tile-") {
             if let Some(window) = app.get_webview_window(label) {
                 let _ = window.close();
             }
@@ -901,7 +455,7 @@ fn toggle_app_visibility(app: &AppHandle) {
             if let Some(window) = app.get_webview_window(label) {
                 let _ = window.unminimize();
                 let _ = window.show();
-                if focus_target.is_none() || label == MAIN_WINDOW_LABEL {
+                if focus_target.is_none() || label == NOTEPAD_WINDOW_LABEL {
                     focus_target = Some(label.clone());
                 }
             }
@@ -985,16 +539,14 @@ pub fn take_startup_file() -> Option<String> {
 
 pub fn setup_desktop(app: &mut App) -> Result<(), Box<dyn Error>> {
     app.manage(RuntimeState::default());
-    app.manage(NotepadPool::default());
     setup_autostart_plugin(app.handle())?;
     setup_global_shortcut_plugin(app.handle())?;
     sync_autostart_to_config(app.handle());
     register_configured_global_shortcut(app.handle());
     setup_tray(app)?;
-    schedule_notepad_prewarm(app.handle());
 
     if !std::env::args().any(|a| a == "--silent") {
-        if let Err(error) = show_main_window(app.handle()) {
+        if let Err(error) = show_notepad_window(app.handle()) {
             eprintln!("failed to show main window on startup: {error}");
         }
     }
@@ -1019,15 +571,7 @@ pub fn handle_window_event(window: &Window, event: &WindowEvent) {
         return;
     }
 
-    if matches!(event, WindowEvent::CloseRequested { .. })
-        && should_save_surface_size_before_close(window.label())
-    {
-        if let Some(webview) = window.app_handle().get_webview_window(window.label()) {
-            save_surface_size(&webview);
-        }
-    }
-
-    if window.label() != MAIN_WINDOW_LABEL {
+    if window.label() != NOTEPAD_WINDOW_LABEL {
         return;
     }
 
@@ -1035,15 +579,15 @@ pub fn handle_window_event(window: &Window, event: &WindowEvent) {
         return;
     };
 
-    match main_window_close_action(app_is_exiting(window.app_handle()), close_to_tray_enabled()) {
-        MainWindowCloseAction::AllowClose => {}
-        MainWindowCloseAction::HideToTray => {
+    match shell_close_action(app_is_exiting(window.app_handle()), close_to_tray_enabled()) {
+        ShellCloseAction::AllowClose => {}
+        ShellCloseAction::HideToTray => {
             api.prevent_close();
             if let Err(error) = window.hide() {
                 eprintln!("failed to hide main window to tray: {error}");
             }
         }
-        MainWindowCloseAction::ExitApp => {
+        ShellCloseAction::ExitApp => {
             api.prevent_close();
             mark_app_exiting(window.app_handle());
             window.app_handle().exit(0);
@@ -1051,13 +595,13 @@ pub fn handle_window_event(window: &Window, event: &WindowEvent) {
     }
 }
 
-fn main_window_close_action(app_is_exiting: bool, close_to_tray: bool) -> MainWindowCloseAction {
+fn shell_close_action(app_is_exiting: bool, close_to_tray: bool) -> ShellCloseAction {
     if app_is_exiting {
-        MainWindowCloseAction::AllowClose
+        ShellCloseAction::AllowClose
     } else if close_to_tray {
-        MainWindowCloseAction::HideToTray
+        ShellCloseAction::HideToTray
     } else {
-        MainWindowCloseAction::ExitApp
+        ShellCloseAction::ExitApp
     }
 }
 
@@ -1087,8 +631,8 @@ fn setup_tray(app: &mut App) -> Result<(), Box<dyn Error>> {
                 ..
             } = event
             {
-                if let Err(error) = show_main_window(tray.app_handle()) {
-                    eprintln!("failed to show main window from tray: {error}");
+                if let Err(error) = open_notepad_window_now(tray.app_handle(), None, None) {
+                    eprintln!("failed to show notepad from tray: {error}");
                 }
             }
         })
@@ -1099,7 +643,7 @@ fn setup_tray(app: &mut App) -> Result<(), Box<dyn Error>> {
 
 fn handle_tray_menu_event(app: &AppHandle, id: &str) -> Result<(), Box<dyn Error>> {
     match tray_menu_action(id) {
-        Some(TrayMenuAction::ShowMain) => show_main_window(app)?,
+        Some(TrayMenuAction::ShowNotepad) => show_notepad_window(app)?,
         Some(TrayMenuAction::QuickNote) => {
             open_notepad_window_now(app, None, None)?;
         }
@@ -1135,42 +679,8 @@ fn toggle_close_to_tray(_app: &AppHandle) -> Result<AppConfig, Box<dyn Error>> {
     Ok(config)
 }
 
-pub fn show_main_window(app: &AppHandle) -> Result<(), AppError> {
-    clear_hidden_window_state(app);
-    let locale = configured_locale();
-
-    if let Some(window) = app.get_webview_window(MAIN_WINDOW_LABEL) {
-        window.set_title(locales::main_window_title(locale))?;
-        window.unminimize()?;
-        window.show()?;
-        window.set_focus()?;
-        return Ok(());
-    }
-
-    let label = open_or_focus_window(
-        app,
-        MAIN_WINDOW_LABEL,
-        WindowOpenOptions {
-            url: "index.html".to_string(),
-            title: locales::main_window_title(locale).to_string(),
-            specs: WindowSizeSpec {
-                width: 1180.0,
-                height: 760.0,
-                min_width: 900.0,
-                min_height: 620.0,
-            },
-            decorations: false,
-            always_on_top: false,
-            shadow: true,
-            skip_taskbar: false,
-            bounds: None,
-        },
-    )?;
-    if let Some(window) = app.get_webview_window(&label) {
-        window.unminimize()?;
-        window.show()?;
-        window.set_focus()?;
-    }
+pub fn show_notepad_window(app: &AppHandle) -> Result<(), AppError> {
+    open_notepad_window_now(app, None, None)?;
     Ok(())
 }
 
@@ -1179,16 +689,15 @@ fn open_notepad_window_now(
     note_id: Option<&str>,
     bounds: Option<WindowBounds>,
 ) -> Result<String, AppError> {
-    if note_id.is_none() {
-        if let Some(reused) = activate_pooled_notepad(app, bounds) {
-            clear_hidden_window_state(app);
-            return Ok(reused);
-        }
+    let effective_bounds = bounds.or_else(fixed_notepad_bounds);
+    if let Some(reused) = activate_existing_notepad(app, note_id, effective_bounds)? {
+        clear_hidden_window_state(app);
+        return Ok(reused);
     }
 
     let locale = configured_locale();
-    let label = notepad_window_label(note_id);
-    let specs = saved_surface_specs(app);
+    let label = notepad_window_label();
+    let specs = notepad_window_specs();
     let url = match note_id {
         Some(id) => format!("index.html?view=notepad&noteId={id}"),
         None => "index.html?view=notepad".to_string(),
@@ -1205,28 +714,40 @@ fn open_notepad_window_now(
             always_on_top: true,
             shadow: false,
             skip_taskbar: true,
-            bounds,
+            bounds: effective_bounds,
         },
     )
 }
 
-fn activate_pooled_notepad(app: &AppHandle, bounds: Option<WindowBounds>) -> Option<String> {
-    let pool = app.try_state::<NotepadPool>()?;
-    let label = pool.take()?;
-    let window = app.get_webview_window(&label)?;
+fn activate_existing_notepad(
+    app: &AppHandle,
+    note_id: Option<&str>,
+    bounds: Option<WindowBounds>,
+) -> Result<Option<String>, AppError> {
+    let label = notepad_window_label();
+    let Some(window) = app.get_webview_window(&label) else {
+        return Ok(None);
+    };
+
     let locale = configured_locale();
+    let was_visible = window.is_visible().unwrap_or(false);
 
-    let specs = saved_surface_specs(app);
-    let _ = window.set_title(locales::notepad_window_title(locale));
-    let _ = window.set_size(tauri::LogicalSize::new(specs.width, specs.height));
-    let _ = apply_window_bounds(&window, bounds);
-    let _ = window.show();
-    let _ = window.set_focus();
-    let _ = window.emit("notepad:activate", label.clone());
+    window.set_title(locales::notepad_window_title(locale))?;
+    if !was_visible && bounds.is_none() {
+        let specs = notepad_window_specs();
+        window.set_size(tauri::LogicalSize::new(specs.width, specs.height))?;
+    }
+    apply_window_bounds(&window, bounds)?;
+    window.show()?;
+    window.set_focus()?;
 
-    schedule_notepad_replenish(app, 100);
+    if let Some(note_id) = note_id {
+        let _ = window.emit("notepad:open-note", note_id.to_string());
+    } else if !was_visible {
+        let _ = window.emit("notepad:activate", label.clone());
+    }
 
-    Some(label)
+    Ok(Some(label))
 }
 
 pub fn recycle_notepad_window(app: &AppHandle, label: &str) -> Result<(), AppError> {
@@ -1234,125 +755,23 @@ pub fn recycle_notepad_window(app: &AppHandle, label: &str) -> Result<(), AppErr
         return Ok(());
     };
 
-    save_surface_size(&window);
-
     window.hide()?;
-
-    let recycled = app
-        .try_state::<NotepadPool>()
-        .map(|pool| pool.put(label.to_string()))
-        .unwrap_or(false);
-
-    if !recycled {
-        window.close()?;
-    }
-
-    Ok(())
-}
-
-fn save_surface_size(window: &tauri::WebviewWindow) {
-    let Ok(store) = default_store() else {
-        return;
-    };
-    let Ok(mut config) = store.load_config() else {
-        return;
-    };
-    if !config.remember_surface_size {
-        return;
-    }
-    let Ok(size) = window.inner_size() else {
-        return;
-    };
-    let scale = window.scale_factor().unwrap_or(1.0);
-    let logical = size.to_logical::<f64>(scale);
-    let w = logical.width.round() as u32;
-    let h = logical.height.round() as u32;
-    if w == 0 || h == 0 {
-        return;
-    }
-    if config.surface_width == Some(w) && config.surface_height == Some(h) {
-        return;
-    }
-    config.surface_width = Some(w);
-    config.surface_height = Some(h);
-    let _ = store.save_config(config);
-}
-
-fn should_save_surface_size_before_close(label: &str) -> bool {
-    label.starts_with("notepad-") || label.starts_with("tile-")
-}
-
-fn schedule_notepad_prewarm(app: &AppHandle) {
-    for i in 0..NOTEPAD_POOL_CAPACITY {
-        let delay = 800 + i as u64 * 400;
-        schedule_notepad_replenish(app, delay);
-    }
-}
-
-fn schedule_notepad_replenish(app: &AppHandle, delay_ms: u64) {
-    let handle = app.clone();
-    std::thread::spawn(move || {
-        std::thread::sleep(std::time::Duration::from_millis(delay_ms));
-        let handle_inner = handle.clone();
-        let _ = handle.run_on_main_thread(move || {
-            if let Err(error) = prewarm_notepad(&handle_inner) {
-                eprintln!("failed to replenish notepad pool: {error}");
-            }
-        });
-    });
-}
-
-fn prewarm_notepad(app: &AppHandle) -> Result<(), AppError> {
-    let pool = app.try_state::<NotepadPool>().ok_or_else(|| AppError {
-        code: "noPool".into(),
-        message: "notepad pool not initialized".into(),
-        details: Default::default(),
-    })?;
-
-    if !pool.is_below_capacity() {
-        return Ok(());
-    }
-
-    let label = notepad_window_label(None);
-    let specs = notepad_window_specs();
-    let visual_options = dynamic_window_visual_options(&label);
-    let locale = configured_locale();
-
-    WebviewWindowBuilder::new(
-        app,
-        &label,
-        WebviewUrl::App("index.html?view=notepad&standby=1".into()),
-    )
-    .title(locales::notepad_window_title(locale))
-    .inner_size(specs.width, specs.height)
-    .min_inner_size(specs.min_width, specs.min_height)
-    .resizable(true)
-    .decorations(false)
-    .transparent(visual_options.transparent)
-    .always_on_top(true)
-    .shadow(false)
-    .skip_taskbar(true)
-    .visible(false)
-    .focused(false)
-    .build()?;
-
-    pool.put(label);
 
     Ok(())
 }
 
 fn notepad_window_specs() -> WindowSizeSpec {
     WindowSizeSpec {
-        width: 260.0,
-        height: 260.0,
-        min_width: 220.0,
-        min_height: 220.0,
+        width: 416.0,
+        height: 433.0,
+        min_width: 320.0,
+        min_height: 260.0,
     }
 }
 
 #[cfg(target_os = "windows")]
 #[allow(clippy::upper_case_acronyms)]
-fn cursor_centered_bounds(specs: &WindowSizeSpec) -> Option<WindowBounds> {
+fn fixed_notepad_bounds() -> Option<WindowBounds> {
     #[repr(C)]
     struct POINT {
         x: i32,
@@ -1375,22 +794,18 @@ fn cursor_centered_bounds(specs: &WindowSizeSpec) -> Option<WindowBounds> {
     type HMONITOR = isize;
     const MONITOR_DEFAULTTONEAREST: u32 = 2;
     extern "system" {
-        fn GetCursorPos(lp_point: *mut POINT) -> i32;
         fn MonitorFromPoint(pt: POINT, dw_flags: u32) -> HMONITOR;
         fn GetMonitorInfoW(h_monitor: HMONITOR, lpmi: *mut MONITORINFO) -> i32;
         fn GetDpiForSystem() -> u32;
     }
-    let mut pt = POINT { x: 0, y: 0 };
-    if unsafe { GetCursorPos(&mut pt) } == 0 {
-        return None;
-    }
+    let specs = notepad_window_specs();
     let scale = unsafe { GetDpiForSystem() } as f64 / 96.0;
     let w = (specs.width * scale) as i32;
     let h = (specs.height * scale) as i32;
-    let mut x = pt.x - w / 2;
-    let mut y = pt.y - h / 2;
+    let mut x = 24;
+    let mut y = 24;
 
-    let hmon = unsafe { MonitorFromPoint(POINT { x: pt.x, y: pt.y }, MONITOR_DEFAULTTONEAREST) };
+    let hmon = unsafe { MonitorFromPoint(POINT { x: 0, y: 0 }, MONITOR_DEFAULTTONEAREST) };
     if hmon != 0 {
         let mut mi = MONITORINFO {
             cb_size: std::mem::size_of::<MONITORINFO>() as u32,
@@ -1410,8 +825,8 @@ fn cursor_centered_bounds(specs: &WindowSizeSpec) -> Option<WindowBounds> {
         };
         if unsafe { GetMonitorInfoW(hmon, &mut mi) } != 0 {
             let work = &mi.rc_work;
-            x = x.max(work.left).min(work.right - w);
-            y = y.max(work.top).min(work.bottom - h);
+            x = work.right - w - 24;
+            y = work.top + 24;
         }
     }
 
@@ -1424,58 +839,30 @@ fn cursor_centered_bounds(specs: &WindowSizeSpec) -> Option<WindowBounds> {
 }
 
 #[cfg(not(target_os = "windows"))]
-fn cursor_centered_bounds(_specs: &WindowSizeSpec) -> Option<WindowBounds> {
-    None
+fn fixed_notepad_bounds() -> Option<WindowBounds> {
+    let specs = notepad_window_specs();
+    Some(WindowBounds {
+        x: 24,
+        y: 24,
+        width: specs.width.round() as u32,
+        height: specs.height.round() as u32,
+    })
 }
 
-fn saved_surface_specs(app: &AppHandle) -> WindowSizeSpec {
-    let defaults = notepad_window_specs();
-    let Ok(config) = load_config() else {
-        return defaults;
-    };
-    if !config.remember_surface_size {
-        return defaults;
-    }
-    if let Some((w, h)) = visible_surface_size(app) {
-        return WindowSizeSpec {
-            width: w.max(defaults.min_width),
-            height: h.max(defaults.min_height),
-            ..defaults
-        };
-    }
-    match (config.surface_width, config.surface_height) {
-        (Some(w), Some(h)) => WindowSizeSpec {
-            width: (w as f64).max(defaults.min_width),
-            height: (h as f64).max(defaults.min_height),
-            ..defaults
-        },
-        _ => defaults,
-    }
+fn visible_tile_window(app: &AppHandle) -> Option<tauri::WebviewWindow> {
+    app.webview_windows()
+        .into_iter()
+        .find(|(label, window)| label.starts_with("tile-") && window.is_visible().unwrap_or(false))
+        .map(|(_, window)| window)
 }
 
-fn visible_surface_size(app: &AppHandle) -> Option<(f64, f64)> {
-    let mut fallback: Option<(f64, f64)> = None;
-    for (label, window) in app.webview_windows() {
-        if !label.starts_with("notepad-") && !label.starts_with("tile-") {
-            continue;
-        }
-        if !window.is_visible().unwrap_or(false) {
-            continue;
-        }
-        let size = window.inner_size().ok()?;
-        let scale = window.scale_factor().unwrap_or(1.0);
-        let logical = size.to_logical::<f64>(scale);
-        if logical.width <= 0.0 || logical.height <= 0.0 {
-            continue;
-        }
-        if window.is_focused().unwrap_or(false) {
-            return Some((logical.width, logical.height));
-        }
-        if fallback.is_none() {
-            fallback = Some((logical.width, logical.height));
-        }
-    }
-    fallback
+fn visible_notepad_window(app: &AppHandle) -> Option<tauri::WebviewWindow> {
+    app.webview_windows()
+        .into_iter()
+        .find(|(label, window)| {
+            is_notepad_window_label(label) && window.is_visible().unwrap_or(false)
+        })
+        .map(|(_, window)| window)
 }
 
 fn open_tile_window_now(
@@ -1487,7 +874,7 @@ fn open_tile_window_now(
     let label = tile_window_label(note_id);
     let url = format!("index.html?view=tile&noteId={note_id}");
 
-    let specs = saved_surface_specs(app);
+    let specs = notepad_window_specs();
 
     open_or_focus_window(
         app,
@@ -1569,11 +956,12 @@ fn apply_window_bounds(
     Ok(())
 }
 
-fn notepad_window_label(note_id: Option<&str>) -> String {
-    match note_id {
-        Some(id) => format!("notepad-{}", sanitize_label_part(id)),
-        None => format!("notepad-{}", Uuid::new_v4()),
-    }
+fn notepad_window_label() -> String {
+    NOTEPAD_WINDOW_LABEL.to_string()
+}
+
+fn is_notepad_window_label(label: &str) -> bool {
+    label == NOTEPAD_WINDOW_LABEL || label.starts_with("notepad-")
 }
 
 fn tile_window_label(note_id: &str) -> String {
@@ -1581,12 +969,9 @@ fn tile_window_label(note_id: &str) -> String {
 }
 
 fn dynamic_window_visual_options(label: &str) -> DynamicWindowVisualOptions {
-    let is_app_surface =
-        label == MAIN_WINDOW_LABEL || label.starts_with("notepad-") || label.starts_with("tile-");
+    let _ = label;
 
-    DynamicWindowVisualOptions {
-        transparent: is_app_surface,
-    }
+    DynamicWindowVisualOptions { transparent: false }
 }
 
 fn sanitize_label_part(value: &str) -> String {
@@ -1609,9 +994,7 @@ fn load_config() -> Result<AppConfig, AppError> {
 }
 
 fn close_to_tray_enabled() -> bool {
-    load_config()
-        .map(|config| config.close_to_tray)
-        .unwrap_or(true)
+    true
 }
 
 fn app_is_exiting(app: &AppHandle) -> bool {
@@ -1663,12 +1046,15 @@ fn setup_global_shortcut_plugin(app: &AppHandle) -> tauri::Result<()> {
                         }
                     }
                     ShortcutAction::OpenNotepad => {
-                        let bounds = if load_config().map(|c| c.open_at_cursor).unwrap_or(true) {
-                            let specs = saved_surface_specs(app);
-                            cursor_centered_bounds(&specs)
-                        } else {
-                            None
-                        };
+                        if let Some(tile) = visible_tile_window(&app_for_closure) {
+                            let _ = tile.emit("surface-action", "switchToPad");
+                            return;
+                        }
+                        if let Some(notepad) = visible_notepad_window(&app_for_closure) {
+                            let _ = notepad.emit("surface-action", "switchToPad");
+                            return;
+                        }
+                        let bounds = fixed_notepad_bounds();
                         if let Err(error) = app.run_on_main_thread(move || {
                             if let Err(error) =
                                 open_notepad_window_now(&app_for_closure, None, bounds)
@@ -1697,7 +1083,7 @@ fn register_configured_global_shortcut(app: &AppHandle) {
     };
 
     if let Err(error) = install_global_shortcut_bindings(app, &config, false) {
-        let msg = format!("快捷键注册失败：{error}");
+        let msg = format!("蹇嵎閿敞鍐屽け璐ワ細{error}");
         eprintln!("{msg}");
         let _ = app.emit("shortcut-register-failed", &msg);
     }
@@ -1711,7 +1097,7 @@ pub fn check_global_shortcut(
         return Ok(shortcut_check_result(
             false,
             "invalid",
-            format!("快捷键 {shortcut_config} 不受支持"),
+            format!("蹇嵎閿?{shortcut_config} 涓嶅彈鏀寔"),
         ));
     };
 
@@ -1723,7 +1109,7 @@ pub fn check_global_shortcut(
         return Ok(shortcut_check_result(
             true,
             "current",
-            format!("快捷键 {shortcut_config} 当前正在使用"),
+            format!("蹇嵎閿?{shortcut_config} 褰撳墠姝ｅ湪浣跨敤"),
         ));
     }
 
@@ -1733,20 +1119,24 @@ pub fn check_global_shortcut(
                 return Ok(shortcut_check_result(
                     false,
                     "unknown",
-                    format!("检测完成，但释放临时快捷键失败：{error}"),
+                    format!(
+                        "shortcut check completed, but temporary shortcut release failed: {error}"
+                    ),
                 ));
             }
 
             Ok(shortcut_check_result(
                 true,
                 "none",
-                format!("快捷键 {shortcut_config} 未检测到冲突"),
+                format!("蹇嵎閿?{shortcut_config} 鏈娴嬪埌鍐茬獊"),
             ))
         }
         Err(error) => Ok(shortcut_check_result(
             false,
             "registered",
-            format!("快捷键 {shortcut_config} 注册失败，可能已被系统或其他应用占用：{error}"),
+            format!(
+                "shortcut {shortcut_config} registration failed, possibly already in use: {error}"
+            ),
         )),
     }
 }
@@ -1767,15 +1157,15 @@ fn shortcut_check_result(
 fn system_shortcut_conflict(shortcut_config: &str) -> Option<ShortcutCheckResult> {
     let spec = shortcut_from_config(shortcut_config)?;
     let message = if shortcut_matches(&spec, false, false, false, true, ShortcutKey::Space) {
-        Some("与 macOS 系统快捷键 Spotlight 冲突")
+        Some("涓?macOS 绯荤粺蹇嵎閿?Spotlight 鍐茬獊")
     } else if shortcut_matches(&spec, false, true, false, true, ShortcutKey::Space) {
-        Some("与 macOS 系统快捷键 Finder 搜索窗口冲突")
+        Some("涓?macOS 绯荤粺蹇嵎閿?Finder 鎼滅储绐楀彛鍐茬獊")
     } else if shortcut_matches(&spec, true, false, false, false, ShortcutKey::Space)
         || shortcut_matches(&spec, true, true, false, false, ShortcutKey::Space)
     {
-        Some("与 macOS 输入法切换快捷键冲突")
+        Some("涓?macOS 杈撳叆娉曞垏鎹㈠揩鎹烽敭鍐茬獊")
     } else if shortcut_matches(&spec, false, true, false, false, ShortcutKey::Space) {
-        Some("Option+Space 容易与输入法或系统服务快捷键冲突")
+        Some("Option+Space 瀹规槗涓庤緭鍏ユ硶鎴栫郴缁熸湇鍔″揩鎹烽敭鍐茬獊")
     } else {
         None
     }?;
@@ -1838,29 +1228,10 @@ fn parse_configured_shortcut(field: &str, value: &str) -> Result<Shortcut, Box<d
 #[cfg(desktop)]
 fn shortcut_bindings_from_config(config: &AppConfig) -> Result<ShortcutBindings, Box<dyn Error>> {
     let open_notepad = parse_configured_shortcut("globalShortcut", &config.global_shortcut)?;
-    let toggle_visibility = if config.toggle_visibility_shortcut.is_empty() {
-        None
-    } else {
-        Some(parse_configured_shortcut(
-            "toggleVisibilityShortcut",
-            &config.toggle_visibility_shortcut,
-        )?)
-    };
-
-    if toggle_visibility
-        .as_ref()
-        .is_some_and(|shortcut| shortcut == &open_notepad)
-    {
-        return Err(Box::new(AppError {
-            code: "duplicateShortcut".into(),
-            message: "visibility toggle shortcut must differ from global shortcut".into(),
-            details: Default::default(),
-        }));
-    }
 
     Ok(ShortcutBindings {
         open_notepad: Some(open_notepad),
-        toggle_visibility,
+        toggle_visibility: None,
     })
 }
 
@@ -2025,6 +1396,10 @@ fn sync_autostart_to_config(app: &AppHandle) {
         return;
     };
 
+    if !config.autostart && !autostart_enabled(app, false) {
+        return;
+    }
+
     if let Err(error) = apply_autostart(app, config.autostart) {
         eprintln!("failed to sync autostart config: {error}");
     }
@@ -2058,7 +1433,7 @@ fn apply_autostart(app: &AppHandle, enabled: bool) -> Result<(), Box<dyn Error>>
     let manager = app.autolaunch();
     if enabled {
         manager.enable()?;
-    } else {
+    } else if manager.is_enabled().unwrap_or(false) {
         manager.disable()?;
     }
     Ok(())
@@ -2069,39 +1444,6 @@ fn apply_autostart(_app: &AppHandle, _enabled: bool) -> Result<(), Box<dyn Error
     Ok(())
 }
 
-#[cfg(desktop)]
-pub fn start_shortcut_recording(app: &AppHandle) -> Result<(), Box<dyn Error>> {
-    app.global_shortcut().unregister_all()?;
-
-    #[cfg(target_os = "windows")]
-    keyboard_hook::start(app.clone());
-
-    Ok(())
-}
-
-#[cfg(desktop)]
-pub fn stop_shortcut_recording(app: &AppHandle) -> Result<(), Box<dyn Error>> {
-    #[cfg(target_os = "windows")]
-    keyboard_hook::stop();
-
-    let config = load_config()?;
-    if let Err(e) = install_global_shortcut_bindings(app, &config, false) {
-        eprintln!("failed to re-register global shortcuts after recording: {e}");
-    }
-
-    Ok(())
-}
-
-#[cfg(not(desktop))]
-pub fn start_shortcut_recording(_app: &AppHandle) -> Result<(), Box<dyn Error>> {
-    Ok(())
-}
-
-#[cfg(not(desktop))]
-pub fn stop_shortcut_recording(_app: &AppHandle) -> Result<(), Box<dyn Error>> {
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2109,8 +1451,8 @@ mod tests {
     #[test]
     fn maps_tray_menu_ids_to_actions() {
         assert_eq!(
-            tray_menu_action("show-main"),
-            Some(TrayMenuAction::ShowMain)
+            tray_menu_action("show-notepad"),
+            Some(TrayMenuAction::ShowNotepad)
         );
         assert_eq!(
             tray_menu_action("quick-note"),
@@ -2133,18 +1475,8 @@ mod tests {
         let specs = tray_menu_specs(Locale::ZhCn, true, false);
         let ids: Vec<_> = specs.iter().map(|spec| spec.id).collect();
 
-        assert_eq!(
-            ids,
-            vec![
-                "show-main",
-                "quick-note",
-                "toggle-close-to-tray",
-                "toggle-autostart",
-                "quit"
-            ]
-        );
-        assert_eq!(specs[2].checked, Some(true));
-        assert_eq!(specs[3].checked, Some(false));
+        assert_eq!(ids, vec!["quick-note", "toggle-autostart", "quit"]);
+        assert_eq!(specs[1].checked, Some(false));
     }
 
     #[test]
@@ -2241,7 +1573,7 @@ mod tests {
 
     #[cfg(desktop)]
     #[test]
-    fn rejects_duplicate_shortcut_bindings() {
+    fn ignores_visibility_shortcut_bindings() {
         let config = AppConfig {
             locale: "zh-CN".into(),
             notes_dir: "D:\\notes".into(),
@@ -2272,23 +1604,20 @@ mod tests {
             open_at_cursor: true,
             surface_width: None,
             surface_height: None,
+            surface_x: None,
+            surface_y: None,
             toggle_visibility_shortcut: "Ctrl+Shift+K".into(),
         };
 
-        let error = match shortcut_bindings_from_config(&config) {
-            Ok(_) => panic!("expected duplicate shortcut error"),
-            Err(error) => error,
-        };
+        let bindings = shortcut_bindings_from_config(&config).expect("shortcut bindings");
 
-        assert!(error.to_string().contains("must differ"));
+        assert!(bindings.open_notepad.is_some());
+        assert!(bindings.toggle_visibility.is_none());
     }
 
     #[test]
-    fn chooses_exit_when_main_window_closes_without_close_to_tray() {
-        assert_eq!(
-            main_window_close_action(false, false),
-            MainWindowCloseAction::ExitApp
-        );
+    fn chooses_exit_when_notepad_closes_without_close_to_tray() {
+        assert_eq!(shell_close_action(false, false), ShellCloseAction::ExitApp);
     }
 
     #[test]
@@ -2323,6 +1652,8 @@ mod tests {
             open_at_cursor: true,
             surface_width: None,
             surface_height: None,
+            surface_x: None,
+            surface_y: None,
             toggle_visibility_shortcut: String::new(),
         };
         let next = AppConfig {
@@ -2355,6 +1686,8 @@ mod tests {
             open_at_cursor: true,
             surface_width: None,
             surface_height: None,
+            surface_x: None,
+            surface_y: None,
             toggle_visibility_shortcut: "Ctrl+Shift+H".into(),
         };
 
@@ -2378,8 +1711,7 @@ mod tests {
 
     #[test]
     fn builds_stable_dynamic_window_labels() {
-        assert_eq!(notepad_window_label(Some("abc-123")), "notepad-abc-123");
-        assert!(notepad_window_label(None).starts_with("notepad-"));
+        assert_eq!(notepad_window_label(), "notepad");
         assert_eq!(tile_window_label("note-1"), "tile-note-1");
     }
 
@@ -2387,34 +1719,22 @@ mod tests {
     fn keeps_notepad_initial_window_compact() {
         let specs = notepad_window_specs();
 
-        assert_eq!(specs.width, 260.0);
-        assert_eq!(specs.height, 260.0);
-        assert_eq!(specs.min_width, 220.0);
-        assert_eq!(specs.min_height, 220.0);
+        assert_eq!(specs.width, 416.0);
+        assert_eq!(specs.height, 433.0);
+        assert_eq!(specs.min_width, 320.0);
+        assert_eq!(specs.min_height, 260.0);
     }
 
     #[test]
-    fn makes_note_surfaces_transparent() {
+    fn keeps_note_surfaces_opaque() {
         assert_eq!(
-            dynamic_window_visual_options("notepad-note-1"),
-            DynamicWindowVisualOptions { transparent: true }
+            dynamic_window_visual_options("notepad"),
+            DynamicWindowVisualOptions { transparent: false }
         );
         assert_eq!(
             dynamic_window_visual_options("tile-note-1"),
-            DynamicWindowVisualOptions { transparent: true }
+            DynamicWindowVisualOptions { transparent: false }
         );
-        assert_eq!(
-            dynamic_window_visual_options("main"),
-            DynamicWindowVisualOptions { transparent: true }
-        );
-    }
-
-    #[test]
-    fn saves_surface_size_before_notepad_and_tile_windows_close() {
-        assert!(should_save_surface_size_before_close("notepad-note-1"));
-        assert!(should_save_surface_size_before_close("tile-note-1"));
-        assert!(!should_save_surface_size_before_close(MAIN_WINDOW_LABEL));
-        assert!(!should_save_surface_size_before_close("settings"));
     }
 
     #[cfg(target_os = "macos")]
@@ -2440,7 +1760,7 @@ mod tests {
 
         assert!(windows
             .iter()
-            .any(|window| window.as_str() == Some("notepad-*")));
+            .any(|window| window.as_str() == Some("notepad")));
         assert!(permissions
             .iter()
             .any(|permission| permission.as_str() == Some("core:window:allow-set-focus")));

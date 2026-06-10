@@ -1,9 +1,6 @@
-export type ViewMode = "edit" | "split" | "preview";
-
 export type ThemeOption = "light" | "dark" | "system";
 
 export type TileColorMode = "system" | "custom";
-export type BackgroundFit = "cover" | "contain" | "repeat";
 
 export interface AppConfig {
   locale: string;
@@ -11,8 +8,6 @@ export interface AppConfig {
   globalShortcut: string;
   closeToTray: boolean;
   autostart: boolean;
-  defaultViewMode: string;
-  noteAutoSave: boolean;
   noteSurfaceAutoSave: boolean;
   tileColor: string;
   tileColorMode: TileColorMode;
@@ -20,20 +15,11 @@ export interface AppConfig {
   fontSize: number;
   surfaceFontSize: number;
   tabIndentSize: number;
-  externalFileAutoSave: boolean;
-  rememberSurfaceSize: boolean;
   tileCtrlClose: boolean;
   tileRenderMarkdown: boolean;
-  renderHtmlMarkdown: boolean;
   surfaceWidth?: number;
   surfaceHeight?: number;
+  surfaceX?: number;
+  surfaceY?: number;
   toggleVisibilityShortcut: string;
-  openAtCursor: boolean;
-  backgroundImagePath?: string;
-  backgroundFit?: BackgroundFit;
-  backgroundDim?: number;
-  backgroundBlur?: number;
-  backgroundScale?: number;
-  backgroundPositionX?: number;
-  backgroundPositionY?: number;
 }

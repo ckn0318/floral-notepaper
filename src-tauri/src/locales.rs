@@ -24,10 +24,6 @@ pub fn app_name(locale: Locale) -> &'static str {
     }
 }
 
-pub fn main_window_title(locale: Locale) -> &'static str {
-    app_name(locale)
-}
-
 pub fn notepad_window_title(locale: Locale) -> &'static str {
     match locale {
         Locale::ZhCn => "花笺便签",

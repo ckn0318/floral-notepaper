@@ -43,38 +43,6 @@ export function deleteNote(id: string): Promise<void> {
   return invoke("notes_delete", { id });
 }
 
-export function moveNoteCategory(id: string, category: string): Promise<NoteMetadata> {
-  return invoke("notes_move_category", { id, category });
-}
-
-export function listCategories(): Promise<string[]> {
-  return invoke("categories_list");
-}
-
-export function createCategory(name: string): Promise<void> {
-  return invoke("categories_create", { name });
-}
-
-export function renameCategory(oldName: string, newName: string): Promise<void> {
-  return invoke("categories_rename", { oldName, newName });
-}
-
-export function deleteCategory(name: string): Promise<void> {
-  return invoke("categories_delete", { name });
-}
-
-export function readExternalFile(path: string): Promise<string> {
-  return invoke("read_external_file", { path });
-}
-
-export function saveExternalFile(path: string, content: string): Promise<void> {
-  return invoke("save_external_file", { path, content });
-}
-
-export function getFileModifiedTime(path: string): Promise<number> {
-  return invoke("get_file_modified_time", { path });
-}
-
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }

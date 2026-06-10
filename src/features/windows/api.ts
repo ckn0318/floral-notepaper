@@ -21,11 +21,3 @@ export function openTileWindow(noteId: string, bounds?: WindowBounds): Promise<s
 export function toggleTileWindow(noteId: string, bounds?: WindowBounds): Promise<boolean> {
   return invoke("toggle_tile_window", { noteId, bounds: bounds ?? null });
 }
-
-export function openNoteInEditor(noteId: string): Promise<void> {
-  return invoke("open_note_in_editor", { noteId });
-}
-
-export function takeStartupFile(): Promise<string | null> {
-  return invoke("take_startup_file");
-}

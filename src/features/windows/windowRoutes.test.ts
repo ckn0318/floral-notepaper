@@ -11,7 +11,7 @@ describe("window routes", () => {
       view: "tile",
       noteId: "note-1",
     });
-    expect(routeFromSearch("?view=unknown")).toEqual({ view: "main" });
+    expect(routeFromSearch("?view=unknown")).toEqual({ view: "notepad" });
   });
 
   it("builds app urls for dynamic windows", () => {
@@ -22,7 +22,7 @@ describe("window routes", () => {
 
   it("reads the browser location by default", () => {
     expect(getInitialRoute(new URL("https://floral-notepaper.test/?view=main"))).toEqual({
-      view: "main",
+      view: "notepad",
     });
   });
 });

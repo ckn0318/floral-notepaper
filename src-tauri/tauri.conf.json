@@ -13,14 +13,16 @@
     "macOSPrivateApi": true,
     "windows": [
       {
-        "label": "main",
-        "title": "花笺",
-        "width": 1180,
-        "height": 760,
-        "minWidth": 900,
-        "minHeight": 620,
+        "label": "notepad",
+        "title": "花笺便签",
+        "width": 416,
+        "height": 433,
+        "minWidth": 320,
+        "minHeight": 260,
         "decorations": false,
-        "transparent": true,
+        "transparent": false,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
         "visible": false,
         "dragDropEnabled": false
       }

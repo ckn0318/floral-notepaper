@@ -4,7 +4,7 @@ pub mod services;
 
 use locales::Locale;
 use services::notes::{default_store, AppConfig, AppError, Note, NoteMetadata, SaveNoteRequest};
-use std::{fs, path::PathBuf};
+use std::path::PathBuf;
 use tauri::{AppHandle, Emitter, Manager};
 
 #[tauri::command]
@@ -171,44 +171,6 @@ fn config_get() -> Result<AppConfig, AppError> {
 }
 
 #[tauri::command]
-fn copy_background_image(_app: AppHandle, source_path: String) -> Result<String, AppError> {
-    let source = PathBuf::from(source_path.trim());
-    if !source.is_file() {
-        return Err(AppError {
-            code: "invalidSource".into(),
-            message: "background image source not found".into(),
-            details: Default::default(),
-        });
-    }
-
-    let store = default_store()?;
-    let dir = store.base_dir().join("backgrounds");
-    fs::create_dir_all(&dir)?;
-
-    let old_config = store.load_config()?;
-    if !old_config.background_image_path.is_empty() {
-        let old_path = PathBuf::from(&old_config.background_image_path);
-        if old_path.starts_with(&dir) && old_path.is_file() {
-            let _ = fs::remove_file(&old_path);
-        }
-    }
-
-    let ext = source
-        .extension()
-        .and_then(|value| value.to_str())
-        .filter(|value| !value.is_empty())
-        .unwrap_or("png");
-    let dest = dir.join(format!("bg-{}.{}", uuid::Uuid::new_v4(), ext));
-    fs::copy(&source, &dest)?;
-
-    dest.to_str().map(str::to_string).ok_or_else(|| AppError {
-        code: "path".into(),
-        message: "invalid destination path".into(),
-        details: Default::default(),
-    })
-}
-
-#[tauri::command]
 fn config_save(app: AppHandle, config: AppConfig) -> Result<AppConfig, AppError> {
     let store = default_store()?;
     let previous = store.load_config()?;
@@ -228,32 +190,6 @@ fn config_save(app: AppHandle, config: AppConfig) -> Result<AppConfig, AppError>
     }
     let _ = app.emit("config-changed", &saved);
     Ok(saved)
-}
-
-#[tauri::command]
-fn global_shortcut_check(
-    app: AppHandle,
-    shortcut: String,
-) -> Result<desktop::ShortcutCheckResult, AppError> {
-    desktop::check_global_shortcut(&app, &shortcut)
-}
-
-#[tauri::command]
-fn start_shortcut_recording(app: AppHandle) -> Result<(), AppError> {
-    desktop::start_shortcut_recording(&app).map_err(|error| AppError {
-        code: "shortcutRecording".into(),
-        message: error.to_string(),
-        details: Default::default(),
-    })
-}
-
-#[tauri::command]
-fn stop_shortcut_recording(app: AppHandle) -> Result<(), AppError> {
-    desktop::stop_shortcut_recording(&app).map_err(|error| AppError {
-        code: "shortcutRecording".into(),
-        message: error.to_string(),
-        details: Default::default(),
-    })
 }
 
 #[tauri::command]
@@ -289,13 +225,6 @@ async fn toggle_tile_window(
 }
 
 #[tauri::command]
-async fn open_note_in_editor(app: AppHandle, note_id: String) -> Result<(), AppError> {
-    desktop::show_main_window(&app)?;
-    let _ = app.emit("open-note", &note_id);
-    Ok(())
-}
-
-#[tauri::command]
 fn take_startup_file() -> Option<String> {
     desktop::take_startup_file()
 }
@@ -304,13 +233,12 @@ fn take_startup_file() -> Option<String> {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
-        .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
             if let Some(file_path) = desktop::extract_file_arg(&args) {
                 let _ = app.emit("open-external-file", file_path);
             }
-            let _ = desktop::show_main_window(app);
+            let _ = desktop::show_notepad_window(app);
         }))
         .setup(|app| {
             if let Ok(store) = default_store() {
@@ -344,16 +272,11 @@ pub fn run() {
             images_get_base_dir,
             images_clean_unused,
             config_get,
-            copy_background_image,
             config_save,
-            global_shortcut_check,
-            start_shortcut_recording,
-            stop_shortcut_recording,
             open_notepad_window,
             recycle_notepad_window,
             open_tile_window,
             toggle_tile_window,
-            open_note_in_editor,
             take_startup_file
         ])
         .run(tauri::generate_context!())
