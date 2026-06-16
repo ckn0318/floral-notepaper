@@ -10,7 +10,6 @@ import {
   listNotes,
   updateNote,
 } from "../features/notes/api";
-import { useImagePaste } from "../features/images/useImagePaste";
 import { useImageBaseDir } from "../features/images/useImageBaseDir";
 import type { Note, NoteMetadata } from "../features/notes/types";
 import {
@@ -55,12 +54,15 @@ import {
   tileSurfaceModeUnpinNoteId,
 } from "../features/windows/tileWindowEvents";
 import { Tile } from "./Tile";
+import { MarkdownEditor, type MarkdownEditorHandle } from "../features/markdown/MarkdownEditor";
 
 type OpenMode = "new" | "open";
 type NotePadStatus = "empty" | "opened" | "saved" | "dirty" | "saveFailed" | "copied";
 
-const SURFACE_FONT_SIZE_MIN = 10;
-const SURFACE_FONT_SIZE_MAX = 25;
+const SURFACE_ZOOM_MIN = 0.75;
+const SURFACE_ZOOM_MAX = 2;
+const SURFACE_ZOOM_STEP = 0.05;
+const NOTE_AUTO_SAVE_DELAY_MS = 800;
 
 interface NotePadProps {
   initialNoteId?: string;
@@ -133,14 +135,18 @@ export function NotePad({
   const [tileColorRaw, setTileColorRaw] = useState(normalizeTileColor(initialTileColor));
   const [tileColorMode, setTileColorMode] = useState<TileColorMode>("system");
   const [surfaceFontSize, setSurfaceFontSize] = useState(16);
-  const [tileRenderMarkdown, setTileRenderMarkdown] = useState(false);
+  const [surfaceZoom, setSurfaceZoom] = useState(1);
   const [tileColor, setTileColor] = useState(() =>
     resolveTileColor("system", normalizeTileColor(initialTileColor)),
   );
   const [isExiting, setIsExiting] = useState(false);
   const titleRef = useRef<HTMLInputElement>(null);
-  const contentRef = useRef<HTMLTextAreaElement>(null);
+  const editorRef = useRef<MarkdownEditorHandle>(null);
   const configRef = useRef<AppConfig | null>(null);
+  const notesRef = useRef<NoteMetadata[]>([]);
+  const editingNoteIdRef = useRef<string | null>(null);
+  const saveInFlightRef = useRef<Promise<Note> | null>(null);
+  const lastSavedRef = useRef({ title: "", content: "" });
   const isStandby = useRef(
     typeof window !== "undefined" &&
       new URLSearchParams(window.location.search).get("standby") === "1",
@@ -172,10 +178,20 @@ export function NotePad({
     return loadedNotes;
   }, []);
 
+  useEffect(() => {
+    notesRef.current = notes;
+  }, [notes]);
+
+  useEffect(() => {
+    editingNoteIdRef.current = editingNoteId;
+  }, [editingNoteId]);
+
   const applyNote = useCallback((note: Note) => {
     setEditingNoteId(note.id);
+    editingNoteIdRef.current = note.id;
     setTitle(note.title);
     setContent(note.content);
+    lastSavedRef.current = { title: note.title, content: note.content };
     setMode("new");
     setStatus("opened");
   }, []);
@@ -189,7 +205,7 @@ export function NotePad({
         if (!cancelled) {
           configRef.current = loadedConfig;
           setSurfaceFontSize(loadedConfig.surfaceFontSize ?? 16);
-          setTileRenderMarkdown(loadedConfig.tileRenderMarkdown ?? false);
+          setSurfaceZoom(loadedConfig.surfaceZoom ?? 1);
           setTileColorRaw(normalizeTileColor(loadedConfig.tileColor));
           setTileColorMode(loadedConfig.tileColorMode ?? "system");
           setTileColor(
@@ -228,7 +244,7 @@ export function NotePad({
         if (!cancelled) {
           hasEnteredOnce.current = true;
           void showCurrentWindow()
-            .then(() => contentRef.current?.focus())
+            .then(() => editorRef.current?.focus())
             .catch(() => undefined);
         }
       });
@@ -249,8 +265,7 @@ export function NotePad({
       setTileColorRaw(normalizeTileColor(raw));
       setTileColor(resolveTileColor(mode, raw));
       if (event.payload.surfaceFontSize != null) setSurfaceFontSize(event.payload.surfaceFontSize);
-      if (event.payload.tileRenderMarkdown != null)
-        setTileRenderMarkdown(event.payload.tileRenderMarkdown);
+      if (event.payload.surfaceZoom != null) setSurfaceZoom(event.payload.surfaceZoom);
     });
     return () => {
       void unlisten.then((fn) => fn());
@@ -282,6 +297,8 @@ export function NotePad({
 
       isStandby.current = false;
       hasEnteredOnce.current = true;
+      editingNoteIdRef.current = null;
+      lastSavedRef.current = { title: "", content: "" };
       setEditingNoteId(null);
       setTitle("");
       setContent("");
@@ -292,7 +309,7 @@ export function NotePad({
       setSurfaceMode("pad");
       void refreshNotes().catch(() => undefined);
       void showCurrentWindow()
-        .then(() => contentRef.current?.focus())
+        .then(() => editorRef.current?.focus())
         .catch(() => undefined);
     });
     return () => {
@@ -300,47 +317,53 @@ export function NotePad({
     };
   }, [refreshNotes]);
 
-  const saveNote = useCallback(async () => {
-    const existingCategory = notes.find((n) => n.id === editingNoteId)?.category ?? "";
-    const request = { title, content, category: existingCategory };
-    const note = editingNoteId
-      ? await updateNote(editingNoteId, request)
-      : await createNote(request);
+  const saveNote = useCallback(
+    async (nextContent = content) => {
+      const runSave = async () => {
+        const noteId = editingNoteIdRef.current;
+        const existingCategory = notesRef.current.find((n) => n.id === noteId)?.category ?? "";
+        const request = { title, content: nextContent, category: existingCategory };
+        const note = noteId ? await updateNote(noteId, request) : await createNote(request);
 
-    setEditingNoteId(note.id);
-    setNotes((current) => {
-      const metadata = metadataFromNote(note);
-      const exists = current.some((item) => item.id === note.id);
-      const next = exists
-        ? current.map((item) => (item.id === note.id ? metadata : item))
-        : [metadata, ...current];
-      return [...next].sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
-    });
-    setStatus("saved");
-    return note;
-  }, [content, editingNoteId, title]);
+        editingNoteIdRef.current = note.id;
+        setEditingNoteId(note.id);
+        setNotes((current) => {
+          const metadata = metadataFromNote(note);
+          const exists = current.some((item) => item.id === note.id);
+          const next = exists
+            ? current.map((item) => (item.id === note.id ? metadata : item))
+            : [metadata, ...current];
+          return [...next].sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+        });
+        lastSavedRef.current = { title, content: nextContent };
+        setStatus("saved");
+        return note;
+      };
+
+      const previousSave = saveInFlightRef.current;
+      const savePromise = (previousSave ?? Promise.resolve()).then(runSave, runSave);
+      saveInFlightRef.current = savePromise;
+      try {
+        return await savePromise;
+      } finally {
+        if (saveInFlightRef.current === savePromise) {
+          saveInFlightRef.current = null;
+        }
+      }
+    },
+    [content, title],
+  );
 
   const imageBaseDir = useImageBaseDir();
 
   const ensureNoteSaved = useCallback(async (): Promise<string | null> => {
-    if (editingNoteId) return editingNoteId;
-    setErrorMessage(t("notepad.error.saveBeforeImage", { defaultValue: "请先保存笔记再添加图片" }));
-    return null;
-  }, [editingNoteId, t]);
-
-  const {
-    handlePaste: imagePasteHandler,
-    handleDrop: imageDropHandler,
-    handleDragOver: imageDragOverHandler,
-  } = useImagePaste({
-    noteId: editingNoteId,
-    textareaRef: contentRef,
-    setContent,
-    markDirty: () => setStatus("dirty"),
-    onEnsureNoteSaved: ensureNoteSaved,
-    onError: setErrorMessage,
-    t,
-  });
+    if (editingNoteIdRef.current) return editingNoteIdRef.current;
+    setErrorMessage(null);
+    const nextContent = editorRef.current?.getMarkdown() ?? content;
+    setContent(nextContent);
+    const note = await saveNote(nextContent);
+    return note.id;
+  }, [content, saveNote]);
 
   const tileNoteId = editingNoteId ?? initialNoteId ?? "";
 
@@ -387,24 +410,26 @@ export function NotePad({
   const handleSave = useCallback(async () => {
     setErrorMessage(null);
     try {
-      await saveNote();
+      const nextContent = editorRef.current?.getMarkdown() ?? content;
+      setContent(nextContent);
+      await saveNote(nextContent);
     } catch (error) {
       setStatus("saveFailed");
       setErrorMessage(getErrorMessage(error));
     }
-  }, [saveNote]);
+  }, [content, saveNote]);
 
-  const adjustSurfaceFontSize = useCallback((delta: number) => {
-    setSurfaceFontSize((current) => {
+  const adjustSurfaceZoom = useCallback((delta: number) => {
+    setSurfaceZoom((current) => {
       const next = Math.min(
-        SURFACE_FONT_SIZE_MAX,
-        Math.max(SURFACE_FONT_SIZE_MIN, current + delta),
+        SURFACE_ZOOM_MAX,
+        Math.max(SURFACE_ZOOM_MIN, Number((current + delta).toFixed(2))),
       );
       if (next === current) return current;
 
       const config = configRef.current;
       if (config) {
-        const nextConfig = { ...config, surfaceFontSize: next, fontSize: next };
+        const nextConfig = { ...config, surfaceZoom: next };
         configRef.current = nextConfig;
         void saveConfig(nextConfig).catch((error) => {
           setErrorMessage(getErrorMessage(error));
@@ -415,14 +440,37 @@ export function NotePad({
     });
   }, []);
 
-  const handleSurfaceFontWheel = useCallback(
+  const handleSurfaceZoomWheel = useCallback(
     (event: WheelEvent<HTMLElement>) => {
       if (!event.ctrlKey && !event.metaKey) return;
       event.preventDefault();
-      adjustSurfaceFontSize(event.deltaY < 0 ? 1 : -1);
+      adjustSurfaceZoom(event.deltaY < 0 ? SURFACE_ZOOM_STEP : -SURFACE_ZOOM_STEP);
     },
-    [adjustSurfaceFontSize],
+    [adjustSurfaceZoom],
   );
+
+  useEffect(() => {
+    if (mode !== "new" || status !== "dirty") return;
+    if (configRef.current?.noteSurfaceAutoSave === false) return;
+
+    const scheduledContent = editorRef.current?.getMarkdown() ?? content;
+    const hasDraftContent = title.trim().length > 0 || scheduledContent.trim().length > 0;
+    if (!editingNoteIdRef.current && !hasDraftContent) return;
+    if (lastSavedRef.current.title === title && lastSavedRef.current.content === scheduledContent) {
+      return;
+    }
+
+    const timer = window.setTimeout(() => {
+      const nextContent = editorRef.current?.getMarkdown() ?? content;
+      setContent(nextContent);
+      void saveNote(nextContent).catch((error) => {
+        setStatus("saveFailed");
+        setErrorMessage(getErrorMessage(error));
+      });
+    }, NOTE_AUTO_SAVE_DELAY_MS);
+
+    return () => window.clearTimeout(timer);
+  }, [content, mode, saveNote, status, title]);
 
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
@@ -531,11 +579,14 @@ export function NotePad({
 
   const handleDrag = (event: MouseEvent<HTMLElement>) => {
     const target = event.target as HTMLElement;
-    if (target.closest("button,input,textarea")) return;
+    if (target.closest("button,input,textarea,[contenteditable='true'],.milkdown-editor-shell"))
+      return;
     void startCurrentWindowDrag().catch(() => undefined);
   };
 
   const resetDraft = () => {
+    editingNoteIdRef.current = null;
+    lastSavedRef.current = { title: "", content: "" };
     setEditingNoteId(null);
     setTitle("");
     setContent("");
@@ -575,7 +626,7 @@ export function NotePad({
           content={errorMessage || content}
           color={tileColor}
           fontSize={surfaceFontSize}
-          renderMarkdown={!errorMessage && tileRenderMarkdown}
+          renderMarkdown={!errorMessage}
           imageBaseDir={imageBaseDir ?? undefined}
           width="100%"
           className="h-full cursor-default"
@@ -583,7 +634,7 @@ export function NotePad({
           data-context-menu="tile"
           data-note-id={tileNoteId}
           onMouseDown={handleDrag}
-          onWheel={handleSurfaceFontWheel}
+          onWheel={handleSurfaceZoomWheel}
         >
           <button
             type="button"
@@ -690,7 +741,7 @@ export function NotePad({
               <div
                 data-pad-editor-body="true"
                 className="px-4 pt-3 pb-2 flex flex-col flex-1 min-h-0"
-                onWheel={handleSurfaceFontWheel}
+                onWheel={handleSurfaceZoomWheel}
               >
                 <input
                   ref={titleRef}
@@ -703,40 +754,26 @@ export function NotePad({
                   onKeyDown={(event) => {
                     if (event.key === "Enter" || event.key === "ArrowDown") {
                       event.preventDefault();
-                      contentRef.current?.focus();
+                      editorRef.current?.focus();
                     }
                   }}
-                  placeholder={t("notepad.placeholder.title", { defaultValue: "标题（可选）" })}
+                  placeholder={t("notepad.placeholder.title", { defaultValue: "标签（可选）" })}
                   className="w-full font-display font-medium text-ink placeholder:text-ink-ghost/60 mb-2 tracking-wide shrink-0"
                   style={{ fontSize: `${surfaceFontSize}px` }}
                 />
 
-                <textarea
-                  ref={contentRef}
-                  data-tab-indent="true"
+                <MarkdownEditor
+                  ref={editorRef}
                   value={content}
-                  onChange={(event) => {
-                    setContent(event.target.value);
-                    setStatus("dirty");
-                  }}
-                  onPaste={imagePasteHandler}
-                  onDrop={imageDropHandler}
-                  onDragOver={imageDragOverHandler}
-                  onKeyDown={(event) => {
-                    if (event.key === "ArrowUp") {
-                      const ta = contentRef.current;
-                      if (ta && ta.selectionStart === ta.selectionEnd) {
-                        const textBeforeCursor = content.slice(0, ta.selectionStart);
-                        if (!textBeforeCursor.includes("\n")) {
-                          event.preventDefault();
-                          titleRef.current?.focus();
-                        }
-                      }
-                    }
-                  }}
+                  noteId={editingNoteId}
+                  imageBaseDir={imageBaseDir}
+                  zoom={surfaceZoom}
+                  onChange={setContent}
+                  onDirty={() => setStatus("dirty")}
+                  onEnsureNoteSaved={ensureNoteSaved}
+                  onError={setErrorMessage}
+                  t={t}
                   placeholder={t("notepad.placeholder.content", { defaultValue: "写点什么……" })}
-                  className="w-full flex-1 min-h-0 pb-2 leading-relaxed text-ink-soft font-body placeholder:text-ink-ghost/50"
-                  style={{ fontSize: `${surfaceFontSize}px`, tabSize: `var(--tab-indent-size, 2)` }}
                 />
 
                 <div className="flex items-center justify-between mt-auto pt-2 border-t border-paper-deep/30 shrink-0">

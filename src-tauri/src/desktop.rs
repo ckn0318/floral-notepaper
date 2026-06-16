@@ -763,7 +763,7 @@ pub fn recycle_notepad_window(app: &AppHandle, label: &str) -> Result<(), AppErr
 fn notepad_window_specs() -> WindowSizeSpec {
     WindowSizeSpec {
         width: 416.0,
-        height: 433.0,
+        height: 380.0,
         min_width: 320.0,
         min_height: 260.0,
     }
@@ -1588,6 +1588,7 @@ mod tests {
             theme: "light".into(),
             font_size: 14,
             surface_font_size: 14,
+            surface_zoom: 1.0,
             tab_indent_size: 2,
             external_file_auto_save: true,
             background_image_path: String::new(),
@@ -1636,6 +1637,7 @@ mod tests {
             theme: "light".into(),
             font_size: 14,
             surface_font_size: 14,
+            surface_zoom: 1.0,
             tab_indent_size: 2,
             external_file_auto_save: true,
             background_image_path: String::new(),
@@ -1670,6 +1672,7 @@ mod tests {
             theme: "dark".into(),
             font_size: 16,
             surface_font_size: 16,
+            surface_zoom: 1.0,
             tab_indent_size: 4,
             external_file_auto_save: true,
             background_image_path: String::new(),
@@ -1720,7 +1723,7 @@ mod tests {
         let specs = notepad_window_specs();
 
         assert_eq!(specs.width, 416.0);
-        assert_eq!(specs.height, 433.0);
+        assert_eq!(specs.height, 380.0);
         assert_eq!(specs.min_width, 320.0);
         assert_eq!(specs.min_height, 260.0);
     }

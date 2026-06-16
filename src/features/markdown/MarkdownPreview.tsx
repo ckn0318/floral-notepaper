@@ -92,6 +92,19 @@ const rehypePluginsWithHtml = [
   rehypeKatex,
   rehypeSlug,
 ] as Parameters<typeof Markdown>[0]["rehypePlugins"];
+const imageWidthTitlePattern = /(?:^|\s)width=(\d{2,5})(?=\s|$)/;
+
+function getImageWidth(title?: string | null): number | null {
+  const match = title?.match(imageWidthTitlePattern);
+  if (!match) return null;
+  const width = Number(match[1]);
+  return Number.isFinite(width) ? width : null;
+}
+
+function getImageDisplayTitle(title?: string | null): string | undefined {
+  const displayTitle = title?.replace(imageWidthTitlePattern, "").trim();
+  return displayTitle || undefined;
+}
 
 function AlertIcon({ type }: { type: string }) {
   switch (type) {
@@ -161,7 +174,7 @@ function Blockquote({
     );
   }
   return (
-    <blockquote className="border-l-2 border-bamboo/40 pl-4 my-3 text-ink-soft/80 italic leading-[1.9]">
+    <blockquote className="border-l-2 border-bamboo/40 pl-4 my-3 text-ink-soft/80 italic leading-[1.55]">
       {children}
     </blockquote>
   );
@@ -169,40 +182,52 @@ function Blockquote({
 
 const staticComponents: Components = {
   h1: ({ children, id }) => (
-    <h1 id={id} className="text-[1.57em] font-display font-bold text-ink mt-6 mb-4 tracking-wide">
+    <h1
+      id={id}
+      className="text-[1.55em] font-display font-bold text-ink mt-4 mb-2 tracking-wide leading-[1.35]"
+    >
       {children}
     </h1>
   ),
   h2: ({ children, id }) => (
-    <h2 id={id} className="text-[1.21em] font-display font-bold text-ink mt-7 mb-3 tracking-wide">
+    <h2
+      id={id}
+      className="text-[1.3em] font-display font-bold text-ink mt-4 mb-2 tracking-wide leading-[1.35]"
+    >
       {children}
     </h2>
   ),
   h3: ({ children, id }) => (
-    <h3 id={id} className="text-[1.07em] font-display font-bold text-ink mt-5 mb-2 tracking-wide">
+    <h3
+      id={id}
+      className="text-[1.15em] font-display font-bold text-ink mt-4 mb-2 tracking-wide leading-[1.35]"
+    >
       {children}
     </h3>
   ),
   h4: ({ children, id }) => (
-    <h4 id={id} className="text-[1em] font-display font-semibold text-ink mt-4 mb-2 tracking-wide">
+    <h4
+      id={id}
+      className="text-[1em] font-display font-semibold text-ink mt-4 mb-2 tracking-wide leading-[1.35]"
+    >
       {children}
     </h4>
   ),
-  p: ({ children }) => <p className="text-ink-soft leading-[1.9]">{children}</p>,
+  p: ({ children }) => <p className="text-ink-soft my-[0.4rem] leading-[1.55]">{children}</p>,
   strong: ({ children }) => <strong className="font-semibold text-ink">{children}</strong>,
   em: ({ children }) => <em className="italic text-bamboo-light">{children}</em>,
   blockquote: Blockquote,
   ul: ({ children }) => (
-    <ul className="ml-4 text-ink-soft leading-[1.9] list-disc list-outside marker:text-bamboo/40">
+    <ul className="my-[0.45rem] ml-[1.4rem] p-0 text-ink-soft leading-[1.55] list-disc list-outside marker:text-bamboo/40">
       {children}
     </ul>
   ),
   ol: ({ children }) => (
-    <ol className="ml-4 text-ink-soft leading-[1.9] list-decimal list-outside marker:text-bamboo/50 marker:font-mono marker:text-[0.85em]">
+    <ol className="my-[0.45rem] ml-[1.4rem] p-0 text-ink-soft leading-[1.55] list-decimal list-outside marker:text-bamboo/50 marker:font-mono marker:text-[0.85em]">
       {children}
     </ol>
   ),
-  li: ({ children }) => <li className="text-ink-soft leading-[1.9]">{children}</li>,
+  li: ({ children }) => <li className="pl-[0.1rem] text-ink-soft leading-[1.55]">{children}</li>,
   hr: () => (
     <hr className="my-6 border-none h-px bg-gradient-to-r from-transparent via-paper-deep to-transparent" />
   ),
@@ -210,7 +235,7 @@ const staticComponents: Components = {
     const isBlock = className?.startsWith("language-") || String(children).includes("\n");
     if (isBlock) {
       return (
-        <code className="text-[0.85em] font-mono text-ink-soft leading-[1.8] whitespace-pre">
+        <code className="text-[0.85em] font-mono text-ink-soft leading-[1.45] whitespace-pre">
           {children}
         </code>
       );
@@ -284,17 +309,20 @@ export function MarkdownPreview({
   const components = useMemo<Components>(
     () => ({
       ...staticComponents,
-      img: ({ src, alt, ...props }) => {
+      img: ({ src, alt, title, ...props }) => {
         let resolvedSrc = src ?? "";
         if (src?.startsWith("images/") && imageBaseDir) {
           resolvedSrc = convertFileSrc(imageBaseDir + "/" + src);
         }
+        const width = getImageWidth(title);
         return (
           <img
             src={resolvedSrc}
             alt={alt ?? ""}
+            title={getImageDisplayTitle(title)}
             loading="lazy"
-            className="w-[50%] rounded my-2 mx-auto block"
+            className="max-w-full rounded my-2 block"
+            style={{ width: width ? `${width}px` : "85%" }}
             {...props}
           />
         );
@@ -313,7 +341,7 @@ export function MarkdownPreview({
           {content}
         </Markdown>
       ) : (
-        <p className="text-ink-ghost leading-[1.9]">
+        <p className="text-ink-ghost leading-[1.55]">
           {t("markdown.emptyHint", { defaultValue: "预览区会显示当前笔记内容" })}
         </p>
       )}

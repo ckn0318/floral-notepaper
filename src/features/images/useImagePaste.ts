@@ -1,17 +1,9 @@
 import { useCallback, useRef } from "react";
 import type { TFunction } from "i18next";
 import { saveImage } from "./api";
+import { MIME_TO_EXT } from "./imageFiles";
 
-const MAX_IMAGE_SIZE = 20 * 1024 * 1024; // 20 MB
-
-const MIME_TO_EXT: Record<string, string> = {
-  "image/png": "png",
-  "image/jpeg": "jpg",
-  "image/gif": "gif",
-  "image/webp": "webp",
-  "image/bmp": "bmp",
-  "image/svg+xml": "svg",
-};
+const MAX_IMAGE_SIZE = 20 * 1024 * 1024;
 
 interface UseImagePasteOptions {
   noteId: string | null;

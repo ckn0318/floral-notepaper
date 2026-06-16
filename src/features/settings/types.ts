@@ -14,6 +14,7 @@ export interface AppConfig {
   theme: ThemeOption;
   fontSize: number;
   surfaceFontSize: number;
+  surfaceZoom: number;
   tabIndentSize: number;
   tileCtrlClose: boolean;
   tileRenderMarkdown: boolean;

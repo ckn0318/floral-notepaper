@@ -162,7 +162,7 @@
     },
     "placeholder": {
       "content": "写点什么……",
-      "title": "标题（可选）"
+      "title": "标签（可选）"
     },
     "status": {
       "copied": "已复制",

@@ -628,3 +628,195 @@ input::placeholder {
 :root[data-theme="dark"] .markdown-alert-caution .markdown-alert-title {
   color: #e87462;
 }
+
+.milkdown-editor-shell {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 0 0 0.5rem;
+  color: var(--color-ink-soft);
+  font-family: var(--font-body);
+}
+
+.milkdown-editor-shell [data-milkdown-root] {
+  min-height: 100%;
+}
+
+.milkdown-editor-shell .ProseMirror {
+  min-height: 100%;
+  padding: 0 0 1.25rem;
+  font-size: 16px;
+  line-height: 1.55;
+  outline: none;
+  tab-size: var(--tab-indent-size, 2);
+  zoom: var(--surface-zoom, 1);
+}
+
+.milkdown-placeholder {
+  position: absolute;
+  top: 0;
+  left: 0;
+  color: color-mix(in srgb, var(--color-ink-ghost) 70%, transparent);
+  font-size: 16px;
+  line-height: 1.55;
+  pointer-events: none;
+  opacity: 0;
+  zoom: var(--surface-zoom, 1);
+}
+
+.milkdown-editor-shell[data-empty="true"]:not([data-focused="true"]) .milkdown-placeholder {
+  opacity: 1;
+}
+
+.milkdown-editor-shell .ProseMirror p {
+  margin: 0.4rem 0;
+}
+
+.milkdown-editor-shell .ProseMirror h1,
+.milkdown-editor-shell .ProseMirror h2,
+.milkdown-editor-shell .ProseMirror h3,
+.milkdown-editor-shell .ProseMirror h4 {
+  color: var(--color-ink);
+  font-family: var(--font-display);
+  font-weight: 700;
+  line-height: 1.35;
+  margin: 1rem 0 0.55rem;
+}
+
+.milkdown-editor-shell .ProseMirror h1 {
+  font-size: 1.55em;
+}
+
+.milkdown-editor-shell .ProseMirror h2 {
+  font-size: 1.3em;
+}
+
+.milkdown-editor-shell .ProseMirror h3 {
+  font-size: 1.15em;
+}
+
+.milkdown-editor-shell .ProseMirror h4 {
+  font-size: 1em;
+  font-weight: 650;
+}
+
+.milkdown-editor-shell .ProseMirror ul,
+.milkdown-editor-shell .ProseMirror ol {
+  margin: 0.45rem 0 0.45rem 1.4rem;
+  padding: 0;
+}
+
+.milkdown-editor-shell .ProseMirror li {
+  padding-left: 0.1rem;
+}
+
+.milkdown-editor-shell .ProseMirror blockquote {
+  margin: 0.75rem 0;
+  padding-left: 0.9rem;
+  border-left: 2px solid color-mix(in srgb, var(--color-bamboo) 45%, transparent);
+  color: color-mix(in srgb, var(--color-ink-soft) 82%, transparent);
+}
+
+.milkdown-editor-shell .ProseMirror code {
+  padding: 0.08rem 0.32rem;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--color-paper-warm) 82%, transparent);
+  color: var(--color-bamboo);
+  font-family: var(--font-mono);
+  font-size: 0.86em;
+}
+
+.milkdown-editor-shell .ProseMirror pre {
+  margin: 0.75rem 0;
+  padding: 0.75rem 0.9rem;
+  overflow-x: auto;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--color-paper-warm) 88%, transparent);
+}
+
+.milkdown-editor-shell .ProseMirror pre code {
+  display: block;
+  padding: 0;
+  background: transparent;
+  color: var(--color-ink-soft);
+  line-height: 1.45;
+  white-space: pre;
+}
+
+.milkdown-editor-shell .milkdown-image-node {
+  display: block;
+  position: relative;
+  width: 85%;
+  max-width: 100%;
+  height: auto;
+  margin: 0.75rem 0;
+  border-radius: 7px;
+  outline: 2px solid transparent;
+  outline-offset: 2px;
+}
+
+.milkdown-editor-shell .milkdown-image-node img {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  height: auto;
+  border-radius: 6px;
+  user-select: none;
+}
+
+.milkdown-editor-shell .milkdown-image-node:hover,
+.milkdown-editor-shell .milkdown-image-node.milkdown-image-selected {
+  outline-color: #1e9bff;
+}
+
+.milkdown-editor-shell .milkdown-image-resize-handle {
+  position: absolute;
+  right: -7px;
+  bottom: -7px;
+  display: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 3px;
+  background: #1e9bff;
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-cloud) 75%, transparent);
+  cursor: nwse-resize;
+}
+
+.milkdown-editor-shell .milkdown-image-node:hover .milkdown-image-resize-handle,
+.milkdown-editor-shell .milkdown-image-node.milkdown-image-selected .milkdown-image-resize-handle {
+  display: block;
+}
+
+.milkdown-editor-shell .ProseMirror > img {
+  display: block;
+  width: 85%;
+  max-width: 100%;
+  height: auto;
+  margin: 0.75rem 0;
+  border-radius: 6px;
+}
+
+.milkdown-editor-shell .ProseMirror table {
+  width: 100%;
+  margin: 0.75rem 0;
+  border-collapse: collapse;
+  font-size: 0.93em;
+}
+
+.milkdown-editor-shell .ProseMirror th,
+.milkdown-editor-shell .ProseMirror td {
+  padding: 0.35rem 0.55rem;
+  border: 1px solid color-mix(in srgb, var(--color-paper-deep) 70%, transparent);
+}
+
+.milkdown-editor-shell .ProseMirror th {
+  color: var(--color-ink);
+  background: color-mix(in srgb, var(--color-paper-warm) 70%, transparent);
+  font-weight: 650;
+}
+
+.milkdown-editor-shell .ProseMirror-selectednode {
+  outline: 2px solid color-mix(in srgb, var(--color-bamboo) 55%, transparent);
+  outline-offset: 3px;
+}

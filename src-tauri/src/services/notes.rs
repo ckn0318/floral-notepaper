@@ -44,6 +44,8 @@ pub struct AppConfig {
     pub font_size: u32,
     #[serde(default = "default_surface_font_size")]
     pub surface_font_size: u32,
+    #[serde(default = "default_surface_zoom")]
+    pub surface_zoom: f64,
     #[serde(default = "default_tab_indent_size")]
     pub tab_indent_size: u32,
     #[serde(default = "default_external_file_auto_save")]
@@ -363,6 +365,7 @@ impl NoteStore {
         self.ensure_base_dir()?;
         config.notes_dir = ensure_notes_suffix(&config.notes_dir);
         config.tab_indent_size = config.tab_indent_size.clamp(1, 8);
+        config.surface_zoom = config.surface_zoom.clamp(0.75, 2.0);
         is_safe_notes_dir(Path::new(&config.notes_dir))?;
         fs::create_dir_all(&config.notes_dir)?;
         write_json_atomic(&self.config_path(), &config)?;
@@ -777,6 +780,7 @@ impl NoteStore {
             theme: default_theme(),
             font_size: default_font_size(),
             surface_font_size: default_surface_font_size(),
+            surface_zoom: default_surface_zoom(),
             tab_indent_size: default_tab_indent_size(),
             external_file_auto_save: default_external_file_auto_save(),
             background_image_path: String::new(),
@@ -1112,6 +1116,10 @@ fn default_surface_font_size() -> u32 {
     16
 }
 
+fn default_surface_zoom() -> f64 {
+    1.0
+}
+
 fn default_tab_indent_size() -> u32 {
     2
 }
@@ -1292,6 +1300,7 @@ mod tests {
             theme: "dark".into(),
             font_size: 16,
             surface_font_size: 16,
+            surface_zoom: 1.0,
             tab_indent_size: 2,
             external_file_auto_save: true,
             background_image_path: String::new(),
@@ -1350,6 +1359,7 @@ mod tests {
         assert_eq!(loaded.locale, "zh-CN");
         assert_eq!(loaded.font_size, 16);
         assert_eq!(loaded.surface_font_size, 16);
+        assert_eq!(loaded.surface_zoom, 1.0);
     }
 
     #[cfg(target_os = "macos")]

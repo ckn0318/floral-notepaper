@@ -162,7 +162,7 @@
     },
     "placeholder": {
       "content": "Write something…",
-      "title": "Title (optional)"
+      "title": "Tag (optional)"
     },
     "status": {
       "copied": "Copied",
