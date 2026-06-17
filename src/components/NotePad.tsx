@@ -49,10 +49,6 @@ import {
   surfaceModeFromEvent,
 } from "../features/windows/surfaceMode";
 import type { NoteSurfaceMode } from "../features/windows/surfaceMode";
-import {
-  emitTileWindowUnpinned,
-  tileSurfaceModeUnpinNoteId,
-} from "../features/windows/tileWindowEvents";
 import { Tile } from "./Tile";
 import { MarkdownEditor, type MarkdownEditorHandle } from "../features/markdown/MarkdownEditor";
 
@@ -367,27 +363,20 @@ export function NotePad({
 
   const tileNoteId = editingNoteId ?? initialNoteId ?? "";
 
-  const switchSurfaceMode = useCallback(
-    async (nextMode: NoteSurfaceMode) => {
-      const unpinnedNoteId = tileSurfaceModeUnpinNoteId(surfaceMode, nextMode, tileNoteId);
-      setSurfaceMode(nextMode);
-      if (unpinnedNoteId) {
-        void emitTileWindowUnpinned(unpinnedNoteId).catch(() => undefined);
+  const switchSurfaceMode = useCallback(async (nextMode: NoteSurfaceMode) => {
+    setSurfaceMode(nextMode);
+
+    try {
+      if (nextMode === "tile") {
+        await setCurrentWindowAlwaysOnTop(true);
       }
 
-      try {
-        if (nextMode === "tile") {
-          await setCurrentWindowAlwaysOnTop(true);
-        }
-
-        const currentBounds = await getCurrentWindowBounds();
-        await animateCurrentWindowBounds(getSurfaceTargetBounds(nextMode, currentBounds));
-      } catch (error) {
-        setErrorMessage(getErrorMessage(error));
-      }
-    },
-    [surfaceMode, tileNoteId],
-  );
+      const currentBounds = await getCurrentWindowBounds();
+      await animateCurrentWindowBounds(getSurfaceTargetBounds(nextMode, currentBounds));
+    } catch (error) {
+      setErrorMessage(getErrorMessage(error));
+    }
+  }, []);
 
   useEffect(() => {
     function handleSurfaceModeRequest(event: Event) {

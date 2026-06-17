@@ -68,7 +68,7 @@ export function ContextMenuProvider({ children }: { children: React.ReactNode })
       let x = event.clientX;
       let y = event.clientY;
       const menuWidth = 160;
-      const menuHeight = tileTarget ? 150 : 170;
+      const menuHeight = tileTarget ? 90 : 170;
       if (x + menuWidth > window.innerWidth) x = window.innerWidth - menuWidth - 4;
       if (y + menuHeight > window.innerHeight) y = window.innerHeight - menuHeight - 4;
 
@@ -234,7 +234,7 @@ export function ContextMenuProvider({ children }: { children: React.ReactNode })
                 key={item.label}
                 onClick={() => void item.action()}
                 disabled={item.disabled}
-                className={`w-full flex items-center justify-between px-3 py-1.5 text-[12px] font-body transition-colors cursor-pointer disabled:text-ink-ghost/40 disabled:cursor-default disabled:hover:bg-transparent ${
+                className={`w-full flex items-center justify-between px-3 py-1.5 text-[13.5px] font-body transition-colors cursor-pointer disabled:text-ink-ghost/40 disabled:cursor-default disabled:hover:bg-transparent ${
                   "tone" in item && item.tone === "danger"
                     ? "text-red-400 hover:bg-danger-bg hover:text-red-500"
                     : "text-ink-soft hover:bg-bamboo-mist/60 hover:text-bamboo"
