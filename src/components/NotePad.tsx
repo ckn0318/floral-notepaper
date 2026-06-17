@@ -148,6 +148,11 @@ export function NotePad({
       new URLSearchParams(window.location.search).get("standby") === "1",
   );
   const hasEnteredOnce = useRef(false);
+  // Set when the surface is closed via Esc, so the next Ctrl+Space resumes the
+  // last interface instead of resetting to a blank draft. One-shot: consumed on
+  // the next activation. Lives in the persistent (hidden) notepad window, so it
+  // survives hide/show but not a window destroy or app restart (pad-only).
+  const resumeNextOpenRef = useRef(false);
   const statusLabel = useMemo<Record<NotePadStatus, string>>(
     () => ({
       empty: t("notepad.status.empty", { defaultValue: "空" }),
@@ -288,11 +293,25 @@ export function NotePad({
       // not in Tauri environment (tests)
     }
 
-    const unlisten = listen<string>("notepad:activate", (event) => {
-      if (event.payload !== myLabel) return;
+    const unlisten = listen<{ label: string; fresh: boolean }>("notepad:activate", (event) => {
+      if (event.payload.label !== myLabel) return;
 
       isStandby.current = false;
       hasEnteredOnce.current = true;
+      setIsExiting(false);
+
+      const shouldResume = !event.payload.fresh && resumeNextOpenRef.current;
+      resumeNextOpenRef.current = false;
+
+      if (shouldResume) {
+        // Keep the last note/content/mode; just bring the window back.
+        void refreshNotes().catch(() => undefined);
+        void showCurrentWindow()
+          .then(() => editorRef.current?.focus())
+          .catch(() => undefined);
+        return;
+      }
+
       editingNoteIdRef.current = null;
       lastSavedRef.current = { title: "", content: "" };
       setEditingNoteId(null);
@@ -301,7 +320,6 @@ export function NotePad({
       setMode("new");
       setStatus("empty");
       setErrorMessage(null);
-      setIsExiting(false);
       setSurfaceMode("pad");
       void refreshNotes().catch(() => undefined);
       void showCurrentWindow()
@@ -505,14 +523,57 @@ export function NotePad({
     }
   };
 
-  const handleClose = useCallback(() => {
-    setIsExiting(true);
-    const closeSurface = surfaceMode === "tile" ? closeCurrentWindow : recycleCurrentNotepad;
-    void closeSurface().catch((error) => {
-      setIsExiting(false);
-      setErrorMessage(getErrorMessage(error));
-    });
-  }, [surfaceMode]);
+  const handleClose = useCallback(
+    (options?: { resume?: boolean }) => {
+      // Esc arms resume; × / 取消钉屏 (default) leaves it off → next open is fresh.
+      resumeNextOpenRef.current = options?.resume ?? false;
+      setIsExiting(true);
+      const closeSurface = surfaceMode === "tile" ? closeCurrentWindow : recycleCurrentNotepad;
+      void closeSurface().catch((error) => {
+        setIsExiting(false);
+        setErrorMessage(getErrorMessage(error));
+      });
+    },
+    [surfaceMode],
+  );
+
+  const closeWithAutoSave = useCallback(async () => {
+    const nextContent = editorRef.current?.getMarkdown() ?? content;
+    const hasDraftContent = title.trim().length > 0 || nextContent.trim().length > 0;
+    const changed =
+      lastSavedRef.current.title !== title || lastSavedRef.current.content !== nextContent;
+    const shouldSave =
+      configRef.current?.noteSurfaceAutoSave !== false &&
+      changed &&
+      (editingNoteIdRef.current != null || hasDraftContent);
+
+    if (shouldSave) {
+      setContent(nextContent);
+      try {
+        await saveNote(nextContent);
+      } catch (error) {
+        setStatus("saveFailed");
+        setErrorMessage(getErrorMessage(error));
+      }
+    }
+
+    handleClose({ resume: true });
+  }, [content, title, saveNote, handleClose]);
+
+  useEffect(() => {
+    function handleEscClose(event: KeyboardEvent) {
+      if (event.key !== "Escape") return;
+      // Window-local only (not a global shortcut): fires solely when this
+      // notepad/tile window is focused, so Esc never clashes with other apps.
+      // Let an open context menu consume Esc first.
+      if (document.querySelector("[data-context-menu-popover]")) return;
+      event.preventDefault();
+      void closeWithAutoSave();
+    }
+
+    document.addEventListener("keydown", handleEscClose);
+    return () => document.removeEventListener("keydown", handleEscClose);
+  }, [closeWithAutoSave]);
 
   const copyTileContent = useCallback(async () => {
     setErrorMessage(null);

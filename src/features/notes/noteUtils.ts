@@ -99,10 +99,19 @@ export function filterNotes(notes: NoteMetadata[], query: string): NoteMetadata[
   });
 }
 
-export function formatShortDate(value: string): string {
+function timeOfDayPeriod(hour: number, translate: TFunction): string {
+  // 凌晨 0-6 / 早 6-12 / 下午 12-18 / 晚 18-24
+  if (hour < 6) return translate("notepad.period.dawn", { defaultValue: "凌晨" });
+  if (hour < 12) return translate("notepad.period.morning", { defaultValue: "早" });
+  if (hour < 18) return translate("notepad.period.afternoon", { defaultValue: "下午" });
+  return translate("notepad.period.evening", { defaultValue: "晚" });
+}
+
+export function formatShortDate(value: string, translate: TFunction = t): string {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "--";
-  return `${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+  const monthDay = `${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+  return `${monthDay}-${timeOfDayPeriod(date.getHours(), translate)}`;
 }
 
 export function formatTime(value: string): string {

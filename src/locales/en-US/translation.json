@@ -160,6 +160,12 @@
     "error": {
       "copyUnsupported": "Copy is not supported in this environment"
     },
+    "period": {
+      "dawn": "Dawn",
+      "morning": "Morning",
+      "afternoon": "Afternoon",
+      "evening": "Evening"
+    },
     "placeholder": {
       "content": "Write something…",
       "title": "Tag (optional)"

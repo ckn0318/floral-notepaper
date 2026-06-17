@@ -502,7 +502,7 @@ pub async fn open_notepad_window(
     note_id: Option<String>,
     bounds: Option<WindowBounds>,
 ) -> Result<String, AppError> {
-    open_notepad_window_now(&app, note_id.as_deref(), bounds)
+    open_notepad_window_now(&app, note_id.as_deref(), bounds, true)
 }
 
 pub async fn open_tile_window(
@@ -631,7 +631,7 @@ fn setup_tray(app: &mut App) -> Result<(), Box<dyn Error>> {
                 ..
             } = event
             {
-                if let Err(error) = open_notepad_window_now(tray.app_handle(), None, None) {
+                if let Err(error) = open_notepad_window_now(tray.app_handle(), None, None, true) {
                     eprintln!("failed to show notepad from tray: {error}");
                 }
             }
@@ -645,7 +645,7 @@ fn handle_tray_menu_event(app: &AppHandle, id: &str) -> Result<(), Box<dyn Error
     match tray_menu_action(id) {
         Some(TrayMenuAction::ShowNotepad) => show_notepad_window(app)?,
         Some(TrayMenuAction::QuickNote) => {
-            open_notepad_window_now(app, None, None)?;
+            open_notepad_window_now(app, None, None, true)?;
         }
         Some(TrayMenuAction::ToggleCloseToTray) => {
             let config = toggle_close_to_tray(app)?;
@@ -680,17 +680,28 @@ fn toggle_close_to_tray(_app: &AppHandle) -> Result<AppConfig, Box<dyn Error>> {
 }
 
 pub fn show_notepad_window(app: &AppHandle) -> Result<(), AppError> {
-    open_notepad_window_now(app, None, None)?;
+    open_notepad_window_now(app, None, None, true)?;
     Ok(())
+}
+
+#[derive(Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct NotepadActivatePayload {
+    label: String,
+    /// When true the frontend always resets to a blank draft (tray / quick note /
+    /// startup). When false the frontend may resume the last interface if it was
+    /// closed via Esc (global shortcut path only).
+    fresh: bool,
 }
 
 fn open_notepad_window_now(
     app: &AppHandle,
     note_id: Option<&str>,
     bounds: Option<WindowBounds>,
+    force_fresh: bool,
 ) -> Result<String, AppError> {
     let effective_bounds = bounds.or_else(fixed_notepad_bounds);
-    if let Some(reused) = activate_existing_notepad(app, note_id, effective_bounds)? {
+    if let Some(reused) = activate_existing_notepad(app, note_id, effective_bounds, force_fresh)? {
         clear_hidden_window_state(app);
         return Ok(reused);
     }
@@ -723,6 +734,7 @@ fn activate_existing_notepad(
     app: &AppHandle,
     note_id: Option<&str>,
     bounds: Option<WindowBounds>,
+    force_fresh: bool,
 ) -> Result<Option<String>, AppError> {
     let label = notepad_window_label();
     let Some(window) = app.get_webview_window(&label) else {
@@ -744,7 +756,13 @@ fn activate_existing_notepad(
     if let Some(note_id) = note_id {
         let _ = window.emit("notepad:open-note", note_id.to_string());
     } else if !was_visible {
-        let _ = window.emit("notepad:activate", label.clone());
+        let _ = window.emit(
+            "notepad:activate",
+            NotepadActivatePayload {
+                label: label.clone(),
+                fresh: force_fresh,
+            },
+        );
     }
 
     Ok(Some(label))
@@ -1057,7 +1075,7 @@ fn setup_global_shortcut_plugin(app: &AppHandle) -> tauri::Result<()> {
                         let bounds = fixed_notepad_bounds();
                         if let Err(error) = app.run_on_main_thread(move || {
                             if let Err(error) =
-                                open_notepad_window_now(&app_for_closure, None, bounds)
+                                open_notepad_window_now(&app_for_closure, None, bounds, false)
                             {
                                 eprintln!("failed to open notepad from global shortcut: {error}");
                             }

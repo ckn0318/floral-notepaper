@@ -160,6 +160,12 @@
     "error": {
       "copyUnsupported": "当前环境不支持复制"
     },
+    "period": {
+      "dawn": "凌晨",
+      "morning": "早",
+      "afternoon": "下午",
+      "evening": "晚"
+    },
     "placeholder": {
       "content": "写点什么……",
       "title": "标签（可选）"

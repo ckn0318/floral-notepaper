@@ -160,6 +160,12 @@
     "error": {
       "copyUnsupported": "目前環境不支援複製"
     },
+    "period": {
+      "dawn": "凌晨",
+      "morning": "早",
+      "afternoon": "下午",
+      "evening": "晚"
+    },
     "placeholder": {
       "content": "寫點什麼……",
       "title": "標籤（可選）"
