@@ -663,7 +663,7 @@ export function NotePad({
                       : "text-ink-ghost hover:text-ink-faint"
                   }`}
                 >
-                  {editingNoteId ? tabLabels.edit : tabLabels.new}
+                  {tabLabels.edit}
                   {mode === "new" && (
                     <div className="absolute bottom-0 left-3 right-3 h-[2px] bg-bamboo rounded-full" />
                   )}
@@ -775,7 +775,7 @@ export function NotePad({
                       onClick={resetDraft}
                       className="px-4 py-1.5 text-[12px] text-ink-faint hover:text-ink-soft rounded-lg hover:bg-paper-warm transition-all duration-200 cursor-pointer"
                     >
-                      {t("notepad.button.clear", { defaultValue: "清空" })}
+                      {t("notepad.tab.new", { defaultValue: "新建" })}
                     </button>
                     <button
                       onClick={() => void handleSave()}

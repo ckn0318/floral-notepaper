@@ -8,6 +8,8 @@ import { commonmark } from "@milkdown/preset-commonmark";
 import { gfm } from "@milkdown/preset-gfm";
 import { Milkdown, MilkdownProvider, useEditor } from "@milkdown/react";
 import { NodeSelection, Plugin } from "@milkdown/prose/state";
+import { history, redo, undo } from "@milkdown/prose/history";
+import { keymap } from "@milkdown/prose/keymap";
 import type { Node as ProseNode } from "@milkdown/prose/model";
 import type { EditorView, NodeView, NodeViewConstructor } from "@milkdown/prose/view";
 import { $prose, getMarkdown, insert, replaceAll } from "@milkdown/utils";
@@ -171,6 +173,20 @@ function createImageNodeView(
   };
 }
 
+function historyPlugin() {
+  return $prose(() => history());
+}
+
+function historyKeymapPlugin() {
+  return $prose(() =>
+    keymap({
+      "Mod-z": undo,
+      "Mod-y": redo,
+      "Mod-Shift-z": redo,
+    }),
+  );
+}
+
 function imageNodeViewPlugin(imageBaseDir?: string | null) {
   return $prose(
     () =>
@@ -238,6 +254,8 @@ const MilkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(
           .use(gfm)
           .use(clipboard)
           .use(listener)
+          .use(historyPlugin())
+          .use(historyKeymapPlugin())
           .use(imageNodeViewPlugin(imageBaseDir)),
       [imageBaseDir],
     );
