@@ -525,11 +525,14 @@ export function NotePad({
 
   const handleClose = useCallback(
     (options?: { resume?: boolean }) => {
-      // Esc arms resume; × / 取消钉屏 (default) leaves it off → next open is fresh.
-      resumeNextOpenRef.current = options?.resume ?? false;
+      // Esc arms resume (content + window geometry); × / 取消钉屏 (default) leaves
+      // it off → next open is a fresh draft at the default position/size.
+      const resume = options?.resume ?? false;
+      resumeNextOpenRef.current = resume;
       setIsExiting(true);
-      const closeSurface = surfaceMode === "tile" ? closeCurrentWindow : recycleCurrentNotepad;
-      void closeSurface().catch((error) => {
+      const closeSurface =
+        surfaceMode === "tile" ? closeCurrentWindow() : recycleCurrentNotepad(resume);
+      void closeSurface.catch((error) => {
         setIsExiting(false);
         setErrorMessage(getErrorMessage(error));
       });

@@ -19,9 +19,10 @@ export function closeCurrentWindow(): Promise<void> {
   return getCurrentWindow().close();
 }
 
-export function recycleCurrentNotepad(): Promise<void> {
+export function recycleCurrentNotepad(resume: boolean): Promise<void> {
   return invoke("recycle_notepad_window", {
     label: getCurrentWindow().label,
+    resume,
   });
 }
 

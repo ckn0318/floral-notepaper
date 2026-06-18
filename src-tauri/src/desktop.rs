@@ -142,6 +142,10 @@ struct WindowOpenOptions {
 struct RuntimeState {
     is_exiting: AtomicBool,
     windows_hidden: AtomicBool,
+    /// Armed when the notepad is closed via Esc; the next global-shortcut open
+    /// then keeps the window's last position/size instead of resetting to the
+    /// default bounds. One-shot: consumed on the next open.
+    resume_bounds: AtomicBool,
     hidden_window_labels: Mutex<Vec<String>>,
     #[cfg(desktop)]
     shortcut_bindings: Mutex<ShortcutBindings>,
@@ -168,6 +172,14 @@ impl RuntimeState {
 
     fn is_exiting(&self) -> bool {
         self.is_exiting.load(Ordering::SeqCst)
+    }
+
+    fn set_resume_bounds(&self, resume: bool) {
+        self.resume_bounds.store(resume, Ordering::SeqCst);
+    }
+
+    fn take_resume_bounds(&self) -> bool {
+        self.resume_bounds.swap(false, Ordering::SeqCst)
     }
 
     fn clear_hidden_windows(&self) {
@@ -700,8 +712,22 @@ fn open_notepad_window_now(
     bounds: Option<WindowBounds>,
     force_fresh: bool,
 ) -> Result<String, AppError> {
-    let effective_bounds = bounds.or_else(fixed_notepad_bounds);
-    if let Some(reused) = activate_existing_notepad(app, note_id, effective_bounds, force_fresh)? {
+    // Consume the Esc-close flag on every open; only honor it for the global
+    // shortcut path (force_fresh == false), so tray / quick note / restart still
+    // get the default bounds.
+    let resume_armed = app
+        .try_state::<RuntimeState>()
+        .map(|state| state.take_resume_bounds())
+        .unwrap_or(false);
+    let keep_bounds = resume_armed && !force_fresh;
+    let effective_bounds = if keep_bounds {
+        None
+    } else {
+        bounds.or_else(fixed_notepad_bounds)
+    };
+    if let Some(reused) =
+        activate_existing_notepad(app, note_id, effective_bounds, force_fresh, keep_bounds)?
+    {
         clear_hidden_window_state(app);
         return Ok(reused);
     }
@@ -735,6 +761,7 @@ fn activate_existing_notepad(
     note_id: Option<&str>,
     bounds: Option<WindowBounds>,
     force_fresh: bool,
+    keep_bounds: bool,
 ) -> Result<Option<String>, AppError> {
     let label = notepad_window_label();
     let Some(window) = app.get_webview_window(&label) else {
@@ -745,11 +772,15 @@ fn activate_existing_notepad(
     let was_visible = window.is_visible().unwrap_or(false);
 
     window.set_title(locales::notepad_window_title(locale))?;
-    if !was_visible && bounds.is_none() {
-        let specs = notepad_window_specs();
-        window.set_size(tauri::LogicalSize::new(specs.width, specs.height))?;
+    // When resuming an Esc-closed note, leave the window's preserved geometry
+    // untouched so its last position/size are restored.
+    if !keep_bounds {
+        if !was_visible && bounds.is_none() {
+            let specs = notepad_window_specs();
+            window.set_size(tauri::LogicalSize::new(specs.width, specs.height))?;
+        }
+        apply_window_bounds(&window, bounds)?;
     }
-    apply_window_bounds(&window, bounds)?;
     window.show()?;
     window.set_focus()?;
 
@@ -768,7 +799,13 @@ fn activate_existing_notepad(
     Ok(Some(label))
 }
 
-pub fn recycle_notepad_window(app: &AppHandle, label: &str) -> Result<(), AppError> {
+pub fn recycle_notepad_window(app: &AppHandle, label: &str, resume: bool) -> Result<(), AppError> {
+    // Esc close arms resume so the next global-shortcut open keeps this geometry;
+    // × close passes false so the next open resets to the default bounds.
+    if let Some(state) = app.try_state::<RuntimeState>() {
+        state.set_resume_bounds(resume);
+    }
+
     let Some(window) = app.get_webview_window(label) else {
         return Ok(());
     };
@@ -783,7 +820,7 @@ fn notepad_window_specs() -> WindowSizeSpec {
         width: 416.0,
         height: 380.0,
         min_width: 320.0,
-        min_height: 260.0,
+        min_height: 180.0,
     }
 }
 
@@ -1745,7 +1782,7 @@ mod tests {
         assert_eq!(specs.width, 416.0);
         assert_eq!(specs.height, 380.0);
         assert_eq!(specs.min_width, 320.0);
-        assert_eq!(specs.min_height, 260.0);
+        assert_eq!(specs.min_height, 180.0);
     }
 
     #[test]

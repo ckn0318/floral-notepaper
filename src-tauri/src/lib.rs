@@ -202,8 +202,12 @@ async fn open_notepad_window(
 }
 
 #[tauri::command]
-async fn recycle_notepad_window(app: AppHandle, label: String) -> Result<(), AppError> {
-    desktop::recycle_notepad_window(&app, &label)
+async fn recycle_notepad_window(
+    app: AppHandle,
+    label: String,
+    resume: bool,
+) -> Result<(), AppError> {
+    desktop::recycle_notepad_window(&app, &label, resume)
 }
 
 #[tauri::command]
