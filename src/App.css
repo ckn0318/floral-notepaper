@@ -36,8 +36,8 @@
 }
 
 :root {
-  --app-window-radius: 0;
-  --app-surface-radius: 0;
+  --app-window-radius: 12px;
+  --app-surface-radius: 12px;
 }
 
 :root[data-theme="dark"] {
@@ -101,7 +101,10 @@ body,
 #root {
   width: 100%;
   height: 100%;
-  background: var(--color-cloud);
+  /* Transparent so the area outside the rounded surface is see-through,
+     giving anti-aliased rounded corners (the opaque rounded card is the
+     surface itself). Requires the window to be transparent + shadow disabled. */
+  background: transparent;
 }
 
 body {
@@ -113,7 +116,7 @@ body {
 
 .app-window-shell {
   border-radius: var(--app-window-radius);
-  background: var(--color-cloud);
+  background: transparent;
   overflow: hidden;
 }
 

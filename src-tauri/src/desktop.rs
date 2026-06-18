@@ -989,7 +989,9 @@ fn tile_window_label(note_id: &str) -> String {
 fn dynamic_window_visual_options(label: &str) -> DynamicWindowVisualOptions {
     let _ = label;
 
-    DynamicWindowVisualOptions { transparent: false }
+    // Transparent so the CSS rounded surface gets anti-aliased corners (the area
+    // outside --app-window-radius is see-through). Pairs with shadow disabled.
+    DynamicWindowVisualOptions { transparent: true }
 }
 
 fn sanitize_label_part(value: &str) -> String {
@@ -1747,14 +1749,14 @@ mod tests {
     }
 
     #[test]
-    fn keeps_note_surfaces_opaque() {
+    fn keeps_note_surfaces_transparent() {
         assert_eq!(
             dynamic_window_visual_options("notepad"),
-            DynamicWindowVisualOptions { transparent: false }
+            DynamicWindowVisualOptions { transparent: true }
         );
         assert_eq!(
             dynamic_window_visual_options("tile-note-1"),
-            DynamicWindowVisualOptions { transparent: false }
+            DynamicWindowVisualOptions { transparent: true }
         );
     }
 
