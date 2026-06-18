@@ -721,7 +721,7 @@ export function NotePad({
               <div className="flex items-center gap-0.5">
                 <button
                   onClick={() => setMode("new")}
-                  className={`relative px-3.5 py-1.5 text-[15px] rounded-t-lg transition-all duration-200 cursor-pointer ${
+                  className={`relative px-3.5 py-1.5 text-[14px] rounded-t-lg transition-all duration-200 cursor-pointer ${
                     mode === "new"
                       ? "text-bamboo font-medium"
                       : "text-ink-ghost hover:text-ink-faint"
@@ -734,7 +734,7 @@ export function NotePad({
                 </button>
                 <button
                   onClick={() => setMode("open")}
-                  className={`relative px-3.5 py-1.5 text-[15px] rounded-t-lg transition-all duration-200 cursor-pointer ${
+                  className={`relative px-3.5 py-1.5 text-[14px] rounded-t-lg transition-all duration-200 cursor-pointer ${
                     mode === "open"
                       ? "text-bamboo font-medium"
                       : "text-ink-ghost hover:text-ink-faint"
