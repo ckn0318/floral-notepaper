@@ -38,6 +38,11 @@
 :root {
   --app-window-radius: 12px;
   --app-surface-radius: 12px;
+  /* Default max display height for un-resized inline images. Images scale by
+     their natural aspect ratio to fit within max-width × this height, so tall
+     images are bounded by height and wide images by width. Manually resized
+     images (with an explicit width=) ignore this and honor the dragged width. */
+  --image-max-height: 180px;
 }
 
 :root[data-theme="dark"] {
@@ -748,22 +753,35 @@ input::placeholder {
 }
 
 .milkdown-editor-shell .milkdown-image-node {
-  display: block;
+  display: inline-block;
   position: relative;
-  width: 85%;
   max-width: 100%;
-  height: auto;
   margin: 0.75rem 0;
+  vertical-align: top;
   border-radius: 7px;
   outline: 2px solid transparent;
   outline-offset: 2px;
 }
 
-.milkdown-editor-shell .milkdown-image-node img {
+/* Default (not manually resized): the wrapper shrink-wraps the image, which
+   fits within max-width × --image-max-height with its aspect ratio preserved. */
+.milkdown-editor-shell .milkdown-image-node[data-resized="false"] img {
+  display: block;
+  width: auto;
+  height: auto;
+  max-width: 100%;
+  max-height: var(--image-max-height);
+  border-radius: 6px;
+  user-select: none;
+}
+
+/* Manually resized: the wrapper carries the explicit pixel width (set inline),
+   the image fills it, height follows the aspect ratio. */
+.milkdown-editor-shell .milkdown-image-node[data-resized="true"] img {
   display: block;
   width: 100%;
-  max-width: 100%;
   height: auto;
+  max-width: 100%;
   border-radius: 6px;
   user-select: none;
 }
@@ -793,8 +811,9 @@ input::placeholder {
 
 .milkdown-editor-shell .ProseMirror > img {
   display: block;
-  width: 85%;
+  width: auto;
   max-width: 100%;
+  max-height: var(--image-max-height);
   height: auto;
   margin: 0.75rem 0;
   border-radius: 6px;

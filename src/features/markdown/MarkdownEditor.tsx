@@ -43,7 +43,10 @@ function resolveImageSrc(src: string, imageBaseDir?: string | null) {
 }
 
 const IMAGE_WIDTH_TITLE_PATTERN = /(?:^|\s)width=(\d{2,5})(?=\s|$)/;
-const MIN_IMAGE_WIDTH = 120;
+const MIN_IMAGE_WIDTH = 20;
+/** Freshly inserted images are fitted to at most this fraction of the editor
+ *  content width (the remainder reads as a gutter, matching the old default). */
+const IMAGE_INSERT_WIDTH_RATIO = 0.85;
 
 function getImageWidth(title: string): number | null {
   const match = title.match(IMAGE_WIDTH_TITLE_PATTERN);
@@ -105,7 +108,9 @@ function createImageNodeView(
     image.alt = alt;
     image.title = displayTitle;
     image.dataset.markdownSrc = src;
-    dom.style.width = width ? `${clampImageWidth(width, dom)}px` : "";
+    // Cap to the container but don't force up to the drag minimum — an
+    // auto-fitted tall image may legitimately be narrower than MIN_IMAGE_WIDTH.
+    dom.style.width = width ? `${Math.min(getMaxImageWidth(dom), width)}px` : "";
     dom.dataset.resized = width ? "true" : "false";
   }
 
@@ -308,7 +313,20 @@ const MilkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(
             if (!resolvedId) return;
           }
 
-          const markdown = await saveImageFilesAsMarkdown(files, resolvedId, tRef.current);
+          const editor = get();
+          let maxWidth = 0;
+          if (editor) {
+            const viewDom = editor.action((ctx) => ctx.get(editorViewCtx).dom) as HTMLElement;
+            const contentWidth = viewDom.getBoundingClientRect().width / getEditorZoom(viewDom);
+            maxWidth = contentWidth * IMAGE_INSERT_WIDTH_RATIO;
+          }
+
+          const markdown = await saveImageFilesAsMarkdown(
+            files,
+            resolvedId,
+            maxWidth > 0 ? { maxWidth } : undefined,
+            tRef.current,
+          );
           if (!markdown) return;
 
           insertMarkdown(markdown);
@@ -324,7 +342,7 @@ const MilkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(
           processingRef.current = false;
         }
       },
-      [insertMarkdown, noteId],
+      [insertMarkdown, noteId, get],
     );
 
     const handlePasteCapture = useCallback(

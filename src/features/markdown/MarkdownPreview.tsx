@@ -322,7 +322,11 @@ export function MarkdownPreview({
             title={getImageDisplayTitle(title)}
             loading="lazy"
             className="max-w-full rounded my-2 block"
-            style={{ width: width ? `${width}px` : "85%" }}
+            style={
+              width
+                ? { width: `${width}px` }
+                : { width: "auto", maxHeight: "var(--image-max-height)" }
+            }
             {...props}
           />
         );
