@@ -8,6 +8,7 @@ import { commonmark } from "@milkdown/preset-commonmark";
 import { gfm } from "@milkdown/preset-gfm";
 import { Milkdown, MilkdownProvider, useEditor } from "@milkdown/react";
 import { NodeSelection, Plugin } from "@milkdown/prose/state";
+import type { Command } from "@milkdown/prose/state";
 import { history, redo, undo } from "@milkdown/prose/history";
 import { keymap } from "@milkdown/prose/keymap";
 import type { Node as ProseNode } from "@milkdown/prose/model";
@@ -192,6 +193,56 @@ function historyKeymapPlugin() {
   );
 }
 
+// Extra vertical slack (px) added to one line height when deciding whether an
+// image sits on the line immediately above/below the caret (covers the image's
+// margin and sub-pixel rounding).
+const SELECT_IMAGE_GAP_SLACK = 22;
+
+/** ArrowUp/ArrowDown that lands on the line occupied by an image selects that
+ *  image (blue node selection) instead of moving the text caret past it, so the
+ *  next Backspace deletes it. Geometry-based, so it works whether the image
+ *  shares a paragraph with text or sits in its own. */
+function selectAdjacentImage(dir: "up" | "down"): Command {
+  return (state, dispatch, view) => {
+    if (!view) return false;
+    const { selection } = state;
+    if (!selection.empty) return false;
+
+    // Nearest image in the travel direction (last before / first after caret).
+    let imagePos = -1;
+    state.doc.descendants((node, pos) => {
+      if (node.type.name !== "image") return;
+      if (dir === "up" && pos < selection.from) imagePos = pos;
+      else if (dir === "down" && pos >= selection.to && imagePos < 0) imagePos = pos;
+    });
+    if (imagePos < 0) return false;
+
+    const dom = view.nodeDOM(imagePos);
+    if (!(dom instanceof HTMLElement)) return false;
+    const image = dom.getBoundingClientRect();
+    const caret = view.coordsAtPos(selection.from);
+    const threshold = Math.max(12, caret.bottom - caret.top) + SELECT_IMAGE_GAP_SLACK;
+
+    const onAdjacentLine =
+      dir === "up"
+        ? image.bottom <= caret.top + 2 && caret.top - image.bottom < threshold
+        : image.top >= caret.bottom - 2 && image.top - caret.bottom < threshold;
+    if (!onAdjacentLine) return false;
+
+    dispatch?.(state.tr.setSelection(NodeSelection.create(state.doc, imagePos)).scrollIntoView());
+    return true;
+  };
+}
+
+function imageArrowKeymapPlugin() {
+  return $prose(() =>
+    keymap({
+      ArrowUp: selectAdjacentImage("up"),
+      ArrowDown: selectAdjacentImage("down"),
+    }),
+  );
+}
+
 function imageNodeViewPlugin(imageBaseDir?: string | null) {
   return $prose(
     () =>
@@ -261,6 +312,7 @@ const MilkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(
           .use(listener)
           .use(historyPlugin())
           .use(historyKeymapPlugin())
+          .use(imageArrowKeymapPlugin())
           .use(imageNodeViewPlugin(imageBaseDir)),
       [imageBaseDir],
     );
