@@ -7,13 +7,15 @@ import { clipboard } from "@milkdown/plugin-clipboard";
 import { commonmark } from "@milkdown/preset-commonmark";
 import { gfm } from "@milkdown/preset-gfm";
 import { Milkdown, MilkdownProvider, useEditor } from "@milkdown/react";
-import { NodeSelection, Plugin } from "@milkdown/prose/state";
+import { NodeSelection, Plugin, TextSelection } from "@milkdown/prose/state";
 import type { Command } from "@milkdown/prose/state";
 import { history, redo, undo } from "@milkdown/prose/history";
 import { keymap } from "@milkdown/prose/keymap";
 import type { Node as ProseNode } from "@milkdown/prose/model";
 import type { EditorView, NodeView, NodeViewConstructor } from "@milkdown/prose/view";
-import { $prose, getMarkdown, insert, replaceAll } from "@milkdown/utils";
+import { $nodeSchema, $prose, $remark, getMarkdown, insert, replaceAll } from "@milkdown/utils";
+import { visit } from "unist-util-visit";
+import type { Paragraph, Parent, Root } from "mdast";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { getImageFiles, MIME_TO_EXT, saveImageFilesAsMarkdown } from "../images/imageFiles";
 
@@ -169,7 +171,7 @@ function createImageNodeView(
   return {
     dom,
     update: (nextNode) => {
-      if (nextNode.type.name !== "image") return false;
+      if (nextNode.type.name !== "image" && nextNode.type.name !== "image_block") return false;
       sync(nextNode);
       return true;
     },
@@ -193,65 +195,246 @@ function historyKeymapPlugin() {
   );
 }
 
-// Extra vertical slack (px) added to one line height when deciding whether an
-// image sits on the line immediately above/below the caret (covers the image's
-// margin and sub-pixel rounding).
-const SELECT_IMAGE_GAP_SLACK = 22;
+/** Block-level image node. CommonMark's inline `image` node is kept (for the
+ *  rare image inside a sentence); this block variant is used for stand-alone
+ *  images so each image owns its own block. With the gap cursor enabled, the
+ *  caret can sit cleanly between/around image blocks without an empty paragraph,
+ *  so consecutive images pack tightly and Backspace removes the block instead of
+ *  deleting an inline image from a shared paragraph.
+ *
+ *  Round-trip: the remark transform below lifts every lone-image paragraph to an
+ *  `imageBlock` mdast node on parse; toMarkdown writes it back as a normal
+ *  `![](...)` paragraph on save (transformers don't re-run on serialize). */
+const imageBlockSchema = $nodeSchema("image_block", () => ({
+  group: "block",
+  atom: true,
+  selectable: true,
+  draggable: true,
+  marks: "",
+  attrs: {
+    src: { default: "" },
+    alt: { default: "" },
+    title: { default: "" },
+  },
+  parseDOM: [
+    {
+      tag: "img[data-image-block]",
+      getAttrs: (dom) => {
+        if (!(dom instanceof HTMLElement)) throw new Error("image_block expects an element");
+        return {
+          src: dom.getAttribute("src") || "",
+          alt: dom.getAttribute("alt") || "",
+          title: dom.getAttribute("title") || "",
+        };
+      },
+    },
+  ],
+  toDOM: (node) => ["img", { "data-image-block": "true", ...node.attrs }],
+  parseMarkdown: {
+    match: ({ type }) => type === "imageBlock",
+    runner: (state, node, type) => {
+      state.addNode(type, {
+        src: (node.url as string) ?? "",
+        alt: (node.alt as string) ?? "",
+        title: (node.title as string) ?? "",
+      });
+    },
+  },
+  toMarkdown: {
+    match: (node) => node.type.name === "image_block",
+    runner: (state, node) => {
+      state.openNode("paragraph");
+      state.addNode("image", undefined, undefined, {
+        url: node.attrs.src,
+        alt: node.attrs.alt,
+        title: node.attrs.title || undefined,
+      });
+      state.closeNode();
+    },
+  },
+}));
 
-/** ArrowUp/ArrowDown that lands on the line occupied by an image selects that
- *  image (blue node selection) instead of moving the text caret past it, so the
- *  next Backspace deletes it. Geometry-based, so it works whether the image
- *  shares a paragraph with text or sits in its own. */
-function selectAdjacentImage(dir: "up" | "down"): Command {
+/** Split every paragraph that contains an image into block-level pieces: each
+ *  image becomes an `imageBlock` mdast node (consumed by imageBlockSchema) and
+ *  each run of non-image content becomes its own paragraph. This pulls images
+ *  onto their own line — including legacy notes where text and an image were
+ *  saved in a single paragraph (`![](a)text`). Parse-only — the serializer calls
+ *  remark.stringify without re-running transformers, so saved markdown stays
+ *  standard `![](...)`. */
+const remarkImageBlock = $remark("remarkImageBlock", () => () => (tree: Root) => {
+  visit(tree, "paragraph", (node: Paragraph, index, parent: Parent | undefined) => {
+    if (!parent || typeof index !== "number") return undefined;
+    if (!node.children.some((child) => child.type === "image")) return undefined;
+
+    const replacement: unknown[] = [];
+    let run: Paragraph["children"] = [];
+    const flushRun = () => {
+      if (run.length) {
+        replacement.push({ type: "paragraph", children: run });
+        run = [];
+      }
+    };
+    for (const child of node.children) {
+      if (child.type === "image") {
+        flushRun();
+        replacement.push({
+          type: "imageBlock",
+          url: child.url,
+          alt: child.alt ?? "",
+          title: child.title ?? "",
+        });
+      } else {
+        run.push(child);
+      }
+    }
+    flushRun();
+
+    parent.children.splice(index, 1, ...(replacement as Parent["children"]));
+    // Continue past the nodes we just inserted (none are image-bearing
+    // paragraphs, so there is nothing left to split here).
+    return index + replacement.length;
+  });
+});
+
+/** ArrowUp/ArrowDown from the edge line of a text block selects the adjacent
+ *  image block (blue node selection, no caret) instead of moving the caret past
+ *  it. Block atoms are selected this way (the macOS-notes-style behavior the
+ *  user expects); we make it explicit rather than relying on the browser. */
+function selectAdjacentImageBlock(dir: "up" | "down"): Command {
   return (state, dispatch, view) => {
-    if (!view) return false;
     const { selection } = state;
     if (!selection.empty) return false;
+    const $side = dir === "up" ? selection.$from : selection.$to;
+    if ($side.depth < 1) return false;
 
-    // Nearest image in the travel direction (last before / first after caret).
-    let imagePos = -1;
-    state.doc.descendants((node, pos) => {
-      if (node.type.name !== "image") return;
-      if (dir === "up" && pos < selection.from) imagePos = pos;
-      else if (dir === "down" && pos >= selection.to && imagePos < 0) imagePos = pos;
-    });
-    if (imagePos < 0) return false;
+    // Fire only when the caret is on the edge line toward `dir`. The robust
+    // signal is the content edge (caret at the very start/end of its block);
+    // endOfTextblock is a DOM-measurement fallback for multi-line blocks where
+    // the caret sits on the edge line but not at its very start/end (it can
+    // misreport, so it must not be the sole gate).
+    const atContentEdge =
+      dir === "up" ? $side.parentOffset === 0 : $side.parentOffset === $side.parent.content.size;
+    if (!atContentEdge && view && !view.endOfTextblock(dir)) return false;
 
-    const dom = view.nodeDOM(imagePos);
-    if (!(dom instanceof HTMLElement)) return false;
-    const image = dom.getBoundingClientRect();
-    const caret = view.coordsAtPos(selection.from);
-    const threshold = Math.max(12, caret.bottom - caret.top) + SELECT_IMAGE_GAP_SLACK;
+    const boundary = dir === "up" ? $side.before(1) : $side.after(1);
+    const $boundary = state.doc.resolve(boundary);
+    const target = dir === "up" ? $boundary.nodeBefore : $boundary.nodeAfter;
+    if (target?.type.name !== "image_block") return false;
+    const targetPos = dir === "up" ? boundary - target.nodeSize : boundary;
 
-    const onAdjacentLine =
-      dir === "up"
-        ? image.bottom <= caret.top + 2 && caret.top - image.bottom < threshold
-        : image.top >= caret.bottom - 2 && image.top - caret.bottom < threshold;
-    if (!onAdjacentLine) return false;
-
-    dispatch?.(state.tr.setSelection(NodeSelection.create(state.doc, imagePos)).scrollIntoView());
+    dispatch?.(state.tr.setSelection(NodeSelection.create(state.doc, targetPos)).scrollIntoView());
     return true;
   };
 }
 
-function imageArrowKeymapPlugin() {
+/** Backspace in an empty paragraph adjacent to an image block removes that blank
+ *  line and selects the image, instead of the default (which would delete the
+ *  image, or — at the document start — do nothing). Handles both the line right
+ *  after an image and a leading blank line right before the first image. */
+const selectImageBlockOnBackspace: Command = (state, dispatch) => {
+  const { selection } = state;
+  if (!selection.empty) return false;
+  const $cursor = selection.$from;
+  if ($cursor.depth !== 1) return false;
+  const parent = $cursor.parent;
+  if (parent.type.name !== "paragraph" || parent.content.size !== 0) return false;
+
+  const before = $cursor.before(1);
+  const after = $cursor.after(1);
+  const prev = state.doc.resolve(before).nodeBefore;
+  const next = state.doc.resolve(after).nodeAfter;
+
+  // Blank line directly after an image → remove it, select that image.
+  if (prev?.type.name === "image_block") {
+    const tr = state.tr.delete(before, after);
+    tr.setSelection(NodeSelection.create(tr.doc, before - prev.nodeSize));
+    dispatch?.(tr.scrollIntoView());
+    return true;
+  }
+  // Leading blank line directly before the first image → remove it, select it.
+  if (before === 0 && next?.type.name === "image_block") {
+    const tr = state.tr.delete(before, after);
+    tr.setSelection(NodeSelection.create(tr.doc, 0));
+    dispatch?.(tr.scrollIntoView());
+    return true;
+  }
+  return false;
+};
+
+/** Enter while an image block is selected moves the caret to the line below it
+ *  (creating one if needed), like ArrowDown. The default (createParagraphNear)
+ *  inserts a paragraph *before* a selected first node, which would push a blank
+ *  line above the image. */
+const moveCaretBelowSelectedImageBlock: Command = (state, dispatch) => {
+  const sel = state.selection;
+  if (!(sel instanceof NodeSelection) || sel.node.type.name !== "image_block") return false;
+  const after = sel.to;
+  let tr = state.tr;
+  if (state.doc.resolve(after).nodeAfter?.type.name !== "paragraph") {
+    const empty = state.schema.nodes.paragraph?.createAndFill();
+    if (!empty) return false;
+    tr = tr.insert(after, empty);
+  }
+  tr = tr.setSelection(TextSelection.create(tr.doc, after + 1));
+  dispatch?.(tr.scrollIntoView());
+  return true;
+};
+
+function imageBlockKeymapPlugin() {
   return $prose(() =>
     keymap({
-      ArrowUp: selectAdjacentImage("up"),
-      ArrowDown: selectAdjacentImage("down"),
+      ArrowUp: selectAdjacentImageBlock("up"),
+      ArrowDown: selectAdjacentImageBlock("down"),
+      Backspace: selectImageBlockOnBackspace,
+      Enter: moveCaretBelowSelectedImageBlock,
     }),
   );
 }
 
+/** Hide the text caret while a node (image block) is selected, so a selected
+ *  image shows only its blue outline — no stray caret on the line below it. */
+function hideCaretOnNodeSelectionPlugin() {
+  return $prose(
+    () =>
+      new Plugin({
+        view: () => ({
+          update: (view) => {
+            view.dom.classList.toggle(
+              "node-selected",
+              view.state.selection instanceof NodeSelection,
+            );
+          },
+        }),
+      }),
+  );
+}
+
+/** Ensure the document always ends with a paragraph, so the caret has a place to
+ *  land after a trailing image block (an atom you can select but not type into).
+ *  Without this, a note ending in an image would trap the caret. */
+function trailingParagraphPlugin() {
+  return $prose(
+    () =>
+      new Plugin({
+        appendTransaction: (transactions, _oldState, state) => {
+          if (!transactions.some((tr) => tr.docChanged)) return null;
+          if (state.doc.lastChild?.type.name !== "image_block") return null;
+          const empty = state.schema.nodes.paragraph?.createAndFill();
+          if (!empty) return null;
+          return state.tr.insert(state.doc.content.size, empty);
+        },
+      }),
+  );
+}
+
 function imageNodeViewPlugin(imageBaseDir?: string | null) {
+  const view = ((node, editorView, getPos) =>
+    createImageNodeView(node, editorView, getPos, imageBaseDir)) as NodeViewConstructor;
   return $prose(
     () =>
       new Plugin({
         props: {
-          nodeViews: {
-            image: ((node, view, getPos) =>
-              createImageNodeView(node, view, getPos, imageBaseDir)) as NodeViewConstructor,
-          },
+          nodeViews: { image: view, image_block: view },
         },
       }),
   );
@@ -310,9 +493,13 @@ const MilkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(
           .use(gfm)
           .use(clipboard)
           .use(listener)
+          .use(remarkImageBlock)
+          .use(imageBlockSchema)
           .use(historyPlugin())
           .use(historyKeymapPlugin())
-          .use(imageArrowKeymapPlugin())
+          .use(imageBlockKeymapPlugin())
+          .use(trailingParagraphPlugin())
+          .use(hideCaretOnNodeSelectionPlugin())
           .use(imageNodeViewPlugin(imageBaseDir)),
       [imageBaseDir],
     );

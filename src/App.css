@@ -661,6 +661,12 @@ input::placeholder {
   zoom: var(--surface-zoom, 1);
 }
 
+/* While an image block is node-selected, hide the text caret so only the blue
+   selection outline shows (no stray caret on the line below). */
+.milkdown-editor-shell .ProseMirror.node-selected {
+  caret-color: transparent;
+}
+
 .milkdown-placeholder {
   position: absolute;
   top: 0;
