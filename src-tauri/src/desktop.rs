@@ -817,8 +817,8 @@ pub fn recycle_notepad_window(app: &AppHandle, label: &str, resume: bool) -> Res
 
 fn notepad_window_specs() -> WindowSizeSpec {
     WindowSizeSpec {
-        width: 416.0,
-        height: 380.0,
+        width: 350.0,
+        height: 300.0,
         min_width: 320.0,
         min_height: 180.0,
     }
@@ -1779,8 +1779,8 @@ mod tests {
     fn keeps_notepad_initial_window_compact() {
         let specs = notepad_window_specs();
 
-        assert_eq!(specs.width, 416.0);
-        assert_eq!(specs.height, 380.0);
+        assert_eq!(specs.width, 350.0);
+        assert_eq!(specs.height, 300.0);
         assert_eq!(specs.min_width, 320.0);
         assert_eq!(specs.min_height, 180.0);
     }
