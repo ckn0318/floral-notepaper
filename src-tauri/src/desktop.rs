@@ -1108,7 +1108,15 @@ fn setup_global_shortcut_plugin(app: &AppHandle) -> tauri::Result<()> {
                             return;
                         }
                         if let Some(notepad) = visible_notepad_window(&app_for_closure) {
-                            let _ = notepad.emit("surface-action", "switchToPad");
+                            // Already-visible notepad: bring it to the front and
+                            // focus its editor (caret restored to where it was, or
+                            // the start when empty) so the user can type at once.
+                            if let Err(error) = app.run_on_main_thread(move || {
+                                let _ = notepad.set_focus();
+                                let _ = notepad.emit("surface-action", "focusEditor");
+                            }) {
+                                eprintln!("failed to focus notepad from global shortcut: {error}");
+                            }
                             return;
                         }
                         let bounds = fixed_notepad_bounds();

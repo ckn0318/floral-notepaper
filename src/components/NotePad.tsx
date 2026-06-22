@@ -138,6 +138,7 @@ export function NotePad({
   const [isExiting, setIsExiting] = useState(false);
   const titleRef = useRef<HTMLInputElement>(null);
   const editorRef = useRef<MarkdownEditorHandle>(null);
+  const surfaceModeRef = useRef(surfaceMode);
   const configRef = useRef<AppConfig | null>(null);
   const notesRef = useRef<NoteMetadata[]>([]);
   const editingNoteIdRef = useRef<string | null>(null);
@@ -397,6 +398,10 @@ export function NotePad({
   }, []);
 
   useEffect(() => {
+    surfaceModeRef.current = surfaceMode;
+  }, [surfaceMode]);
+
+  useEffect(() => {
     function handleSurfaceModeRequest(event: Event) {
       const nextMode = surfaceModeFromEvent(event);
       if (!nextMode) return;
@@ -611,6 +616,22 @@ export function NotePad({
         return;
       }
 
+      if (action === "focusEditor") {
+        setMode("new");
+        const focusSoon = () => requestAnimationFrame(() => editorRef.current?.focus());
+        if (surfaceModeRef.current === "tile") {
+          // The notepad window is currently a tile — switch it back to the pad
+          // first (this is the "Ctrl+Space turns the tile back into the popup"
+          // case), then focus once the editor is mounted.
+          void switchSurfaceMode("pad").then(focusSoon);
+        } else {
+          // Already a pad: just focus the editor. ProseMirror restores its last
+          // caret position (or sits at the start when there's no content yet).
+          focusSoon();
+        }
+        return;
+      }
+
       void switchSurfaceMode("pad");
     }
 
@@ -628,7 +649,7 @@ export function NotePad({
       window.removeEventListener(NOTE_SURFACE_ACTION_EVENT, handleSurfaceActionRequest);
       void unlisten.then((fn) => fn());
     };
-  }, [copyTileContent, handleClose, handleSave, switchSurfaceMode]);
+  }, [copyTileContent, handleClose, handleSave, switchSurfaceMode, setMode]);
 
   const handleDrag = (event: MouseEvent<HTMLElement>) => {
     const target = event.target as HTMLElement;
