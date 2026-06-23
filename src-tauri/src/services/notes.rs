@@ -522,7 +522,14 @@ impl NoteStore {
     }
 
     pub fn images_dir(&self, note_id: &str) -> PathBuf {
-        self.base_dir.join("images").join(note_id)
+        // Images live inside the notes directory (`<notes_dir>/images/<id>`) so
+        // the relative `images/...` path written into each note resolves from
+        // the note file itself — making images render in external markdown
+        // editors too, and keeping the notes folder self-contained/portable.
+        let notes_dir = self
+            .notes_dir()
+            .unwrap_or_else(|_| self.base_dir.join("notes"));
+        notes_dir.join("images").join(note_id)
     }
 
     pub fn save_image(
@@ -853,13 +860,38 @@ impl NoteStore {
         self.ensure_base_dir()?;
         let config = self.load_config()?;
         fs::create_dir_all(&config.notes_dir)?;
+        self.migrate_images_into_notes_dir(Path::new(&config.notes_dir));
         if !self.metadata_path().exists() {
             self.save_metadata(&MetadataFile::default())?;
         }
         Ok(())
     }
 
-    fn notes_dir(&self) -> Result<PathBuf, AppError> {
+    /// One-time move of images from the legacy data-root location
+    /// (`<base_dir>/images`) into the notes directory (`<notes_dir>/images`).
+    /// Best-effort: failures (e.g. a cross-volume custom notes dir) are ignored
+    /// so storage still works. Same-volume upgrades migrate cleanly.
+    fn migrate_images_into_notes_dir(&self, notes_dir: &Path) {
+        let old_root = self.base_dir.join("images");
+        let new_root = notes_dir.join("images");
+        if old_root == new_root || !old_root.exists() {
+            return;
+        }
+        if fs::create_dir_all(&new_root).is_err() {
+            return;
+        }
+        if let Ok(entries) = fs::read_dir(&old_root) {
+            for entry in entries.flatten() {
+                let target = new_root.join(entry.file_name());
+                if !target.exists() {
+                    let _ = fs::rename(entry.path(), &target);
+                }
+            }
+        }
+        let _ = fs::remove_dir(&old_root);
+    }
+
+    pub fn notes_dir(&self) -> Result<PathBuf, AppError> {
         Ok(PathBuf::from(self.load_config()?.notes_dir))
     }
 

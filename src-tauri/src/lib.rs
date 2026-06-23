@@ -148,14 +148,16 @@ fn images_save(note_id: String, data: Vec<u8>, extension: String) -> Result<Stri
 
 #[tauri::command]
 fn images_get_base_dir() -> Result<String, AppError> {
+    // Images are resolved relative to the notes directory (where they now live),
+    // so the frontend prepends this when turning `images/...` into an asset URL.
     let store = default_store()?;
     store
-        .base_dir()
+        .notes_dir()?
         .to_str()
         .map(str::to_string)
         .ok_or_else(|| AppError {
             code: "path".into(),
-            message: "invalid base dir path".into(),
+            message: "invalid notes dir path".into(),
             details: Default::default(),
         })
 }
@@ -246,10 +248,13 @@ pub fn run() {
         }))
         .setup(|app| {
             if let Ok(store) = default_store() {
-                let base = store.base_dir();
                 let scope = app.asset_protocol_scope();
-                let _ = scope.allow_directory(base.join("images"), true);
-                let _ = scope.allow_directory(base.join("backgrounds"), true);
+                let _ = scope.allow_directory(store.base_dir().join("images"), true);
+                let _ = scope.allow_directory(store.base_dir().join("backgrounds"), true);
+                // Images now live under the notes directory.
+                if let Ok(notes_dir) = store.notes_dir() {
+                    let _ = scope.allow_directory(notes_dir.join("images"), true);
+                }
             }
             desktop::setup_desktop(app)?;
             Ok(())
