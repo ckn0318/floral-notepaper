@@ -226,7 +226,7 @@ fn default_base_dir() -> Result<PathBuf, AppError> {
         return Ok(PathBuf::from(home)
             .join("Library")
             .join("Application Support")
-            .join("花笺"));
+            .join("花笺便签"));
     }
 
     // Release builds keep all data (config, index, images, notes) next to the
@@ -241,7 +241,9 @@ fn default_base_dir() -> Result<PathBuf, AppError> {
     }
 
     if let Ok(user_profile) = env::var("USERPROFILE") {
-        return Ok(PathBuf::from(user_profile).join("Documents").join("花笺"));
+        return Ok(PathBuf::from(user_profile)
+            .join("Documents")
+            .join("花笺便签"));
     }
 
     Ok(env::current_dir()?.join("data"))
