@@ -229,6 +229,17 @@ fn default_base_dir() -> Result<PathBuf, AppError> {
             .join("花笺"));
     }
 
+    // Release builds keep all data (config, index, images, notes) next to the
+    // executable so everything lives together under the install folder. Falls
+    // back to the user's Documents folder when the install dir isn't writable
+    // (e.g. a per-machine Program Files install).
+    #[cfg(all(not(debug_assertions), not(target_os = "macos")))]
+    {
+        if let Some(dir) = writable_executable_dir() {
+            return Ok(dir);
+        }
+    }
+
     if let Ok(user_profile) = env::var("USERPROFILE") {
         return Ok(PathBuf::from(user_profile).join("Documents").join("花笺"));
     }
@@ -236,20 +247,19 @@ fn default_base_dir() -> Result<PathBuf, AppError> {
     Ok(env::current_dir()?.join("data"))
 }
 
-#[cfg_attr(test, allow(dead_code))]
-fn default_notes_dir() -> Result<PathBuf, AppError> {
-    #[cfg(debug_assertions)]
-    {
-        return Ok(env::current_dir()?.join("notes"));
+#[cfg(all(not(debug_assertions), not(target_os = "macos")))]
+fn writable_executable_dir() -> Option<PathBuf> {
+    let dir = env::current_exe().ok()?.parent()?.to_path_buf();
+    if fs::create_dir_all(&dir).is_err() {
+        return None;
     }
-
-    #[cfg(not(debug_assertions))]
-    {
-        if let Some(parent) = env::current_exe()?.parent() {
-            return Ok(parent.join("notes"));
+    let probe = dir.join(".floral-write-test");
+    match fs::write(&probe, b"") {
+        Ok(()) => {
+            let _ = fs::remove_file(&probe);
+            Some(dir)
         }
-
-        Ok(env::current_dir()?.join("notes"))
+        Err(_) => None,
     }
 }
 
@@ -758,10 +768,7 @@ impl NoteStore {
     }
 
     fn default_config(&self) -> AppConfig {
-        #[cfg(test)]
         let notes_dir = self.base_dir.join("notes");
-        #[cfg(not(test))]
-        let notes_dir = default_notes_dir().unwrap_or_else(|_| self.base_dir.join("notes"));
 
         AppConfig {
             locale: default_locale(),
