@@ -417,9 +417,10 @@ impl NoteStore {
         self.ensure_storage()?;
         let id = Uuid::new_v4().to_string();
         let now = Utc::now();
-        let file_name = self.file_name_for(&id, &request.title);
         let word_count = count_words(&request.content);
         let category = request.category.clone();
+        let mut metadata_file = self.load_metadata()?;
+        let file_name = self.file_name_for_request(None, &request, now, &category, &metadata_file);
         let note_path = self.note_path_in_category(&file_name, &category);
         if let Some(parent) = note_path.parent() {
             fs::create_dir_all(parent)?;
@@ -436,7 +437,6 @@ impl NoteStore {
         };
 
         fs::write(&note_path, &request.content)?;
-        let mut metadata_file = self.load_metadata()?;
         metadata_file.notes.push(metadata.clone());
         self.save_metadata(&metadata_file)?;
 
@@ -455,16 +455,23 @@ impl NoteStore {
     pub fn update_note(&self, id: &str, request: SaveNoteRequest) -> Result<Note, AppError> {
         self.ensure_storage()?;
         let mut metadata_file = self.load_metadata()?;
-        let note = metadata_file
+        let note_index = metadata_file
             .notes
-            .iter_mut()
-            .find(|note| note.id == id)
+            .iter()
+            .position(|note| note.id == id)
             .ok_or_else(|| AppError::note_not_found(id))?;
 
-        let old_file_name = note.file_name.clone();
-        let old_category = note.category.clone();
-        let new_file_name = self.file_name_for(id, &request.title);
+        let old_file_name = metadata_file.notes[note_index].file_name.clone();
+        let old_category = metadata_file.notes[note_index].category.clone();
+        let created_at = metadata_file.notes[note_index].created_at;
         let new_category = request.category.clone();
+        let new_file_name = self.file_name_for_request(
+            Some(id),
+            &request,
+            created_at,
+            &new_category,
+            &metadata_file,
+        );
         let now = Utc::now();
         let word_count = count_words(&request.content);
 
@@ -482,6 +489,7 @@ impl NoteStore {
             }
         }
 
+        let note = &mut metadata_file.notes[note_index];
         note.title = request.title;
         note.file_name = new_file_name.clone();
         note.category = new_category.clone();
@@ -916,13 +924,71 @@ impl NoteStore {
             .ok_or_else(|| AppError::note_not_found(id))
     }
 
-    fn file_name_for(&self, id: &str, title: &str) -> String {
-        let safe_title = safe_file_stem(title);
-        if safe_title.is_empty() {
-            format!("{id}.md")
+    fn file_name_for_request(
+        &self,
+        current_id: Option<&str>,
+        request: &SaveNoteRequest,
+        created_at: DateTime<Utc>,
+        category: &str,
+        metadata: &MetadataFile,
+    ) -> String {
+        let stem = note_file_stem(&request.title, &request.content, created_at);
+        self.unique_file_name(&stem, category, current_id, metadata)
+    }
+
+    fn unique_file_name(
+        &self,
+        stem: &str,
+        category: &str,
+        current_id: Option<&str>,
+        metadata: &MetadataFile,
+    ) -> String {
+        let base = if stem.is_empty() {
+            "未命名便签"
         } else {
-            format!("{id}_{safe_title}.md")
+            stem
+        };
+        let mut index = 1usize;
+
+        loop {
+            let file_name = if index == 1 {
+                format!("{base}.md")
+            } else {
+                format!("{base} ({index}).md")
+            };
+
+            if self.file_name_available(&file_name, category, current_id, metadata) {
+                return file_name;
+            }
+            index += 1;
         }
+    }
+
+    fn file_name_available(
+        &self,
+        file_name: &str,
+        category: &str,
+        current_id: Option<&str>,
+        metadata: &MetadataFile,
+    ) -> bool {
+        let current_note =
+            current_id.and_then(|id| metadata.notes.iter().find(|note| note.id == id));
+        if metadata.notes.iter().any(|note| {
+            Some(note.id.as_str()) != current_id
+                && note.category == category
+                && note.file_name == file_name
+        }) {
+            return false;
+        }
+
+        let path = self.note_path_in_category(file_name, category);
+        if !path.exists() {
+            return true;
+        }
+
+        current_note
+            .map(|note| note.category == category && note.file_name == file_name)
+            .unwrap_or(false)
     }
 
     fn load_metadata(&self) -> Result<MetadataFile, AppError> {
@@ -1064,6 +1130,66 @@ fn safe_file_stem(title: &str) -> String {
     stem.trim_matches('_').to_string()
 }
 
+fn note_file_stem(title: &str, content: &str, created_at: DateTime<Utc>) -> String {
+    let title_stem = safe_file_stem(title);
+    if !title_stem.is_empty() {
+        return title_stem;
+    }
+
+    let content_stem = content_file_stem(content);
+    if !content_stem.is_empty() {
+        return safe_file_stem(&content_stem);
+    }
+
+    created_at.format("%Y_%-m_%-d_%-H-%M").to_string()
+}
+
+fn content_file_stem(content: &str) -> String {
+    let without_images = strip_markdown_images(content);
+    for line in without_images.lines() {
+        let stem: String = line
+            .chars()
+            .filter(|ch| ch.is_alphanumeric())
+            .take(10)
+            .collect();
+        if !stem.is_empty() {
+            return stem;
+        }
+    }
+    String::new()
+}
+
+fn strip_markdown_images(content: &str) -> String {
+    let mut result = String::new();
+    let mut index = 0usize;
+
+    while let Some(offset) = content[index..].find("![") {
+        let start = index + offset;
+        result.push_str(&content[index..start]);
+        let after_marker = start + 2;
+
+        let Some(alt_end_offset) = content[after_marker..].find(']') else {
+            index = after_marker;
+            continue;
+        };
+        let alt_end = after_marker + alt_end_offset;
+        let open_paren = alt_end + 1;
+        if !content[open_paren..].starts_with('(') {
+            index = after_marker;
+            continue;
+        }
+
+        let Some(close_paren_offset) = content[open_paren + 1..].find(')') else {
+            index = open_paren + 1;
+            continue;
+        };
+        index = open_paren + 1 + close_paren_offset + 1;
+    }
+
+    result.push_str(&content[index..]);
+    result
+}
+
 fn count_words(content: &str) -> usize {
     content.chars().filter(|ch| !ch.is_whitespace()).count()
 }
@@ -1080,11 +1206,12 @@ fn preview(content: &str) -> String {
 
 fn id_from_file_name(file_name: &str) -> Option<String> {
     let stem = file_name.strip_suffix(".md")?;
-    Some(
-        stem.split_once('_')
-            .map(|(id, _)| id.to_string())
-            .unwrap_or_else(|| stem.to_string()),
-    )
+    let first_part = stem.split_once('_').map(|(id, _)| id).unwrap_or(stem);
+    if Uuid::parse_str(first_part).is_ok() {
+        Some(first_part.to_string())
+    } else {
+        Some(stem.to_string())
+    }
 }
 
 fn infer_title(file_name: &str, content: &str) -> String {
@@ -1096,10 +1223,17 @@ fn infer_title(file_name: &str, content: &str) -> String {
         return title.to_string();
     }
 
+    file_stem_without_legacy_id(file_name).replace('_', " ")
+}
+
+fn file_stem_without_legacy_id(file_name: &str) -> String {
     let stem = file_name.strip_suffix(".md").unwrap_or(file_name);
-    stem.split_once('_')
-        .map(|(_, title)| title.replace('_', " "))
-        .unwrap_or_default()
+    if let Some((id, title)) = stem.split_once('_') {
+        if Uuid::parse_str(id).is_ok() {
+            return title.to_string();
+        }
+    }
+    stem.to_string()
 }
 
 fn is_markdown_path(path: &Path) -> bool {
@@ -1293,11 +1427,14 @@ mod tests {
         fs::write(store.metadata_path(), "{ broken json").expect("corrupt metadata");
 
         let repaired = store.list_notes().expect("repair metadata");
-        let ids: Vec<_> = repaired.iter().map(|note| note.id.as_str()).collect();
+        let file_names: Vec<_> = repaired
+            .iter()
+            .map(|note| note.file_name.as_str())
+            .collect();
 
         assert_eq!(repaired.len(), 2);
-        assert!(ids.contains(&first.id.as_str()));
-        assert!(ids.contains(&second.id.as_str()));
+        assert!(file_names.contains(&first.file_name.as_str()));
+        assert!(file_names.contains(&second.file_name.as_str()));
         assert!(store
             .base_dir()
             .read_dir()
@@ -1557,5 +1694,48 @@ mod tests {
             fs::read_to_string(export_path).expect("read exported markdown"),
             content
         );
+    }
+
+    #[test]
+    fn names_notes_from_title_first_text_line_or_created_time() {
+        let created_at = DateTime::parse_from_rfc3339("2026-06-23T21:53:00Z")
+            .expect("valid timestamp")
+            .with_timezone(&Utc);
+
+        assert_eq!(note_file_stem("标签1", "", created_at), "标签1");
+        assert_eq!(
+            note_file_stem(
+                "",
+                "便签使用说明\n按住 `Ctrl` 并滚动鼠标滚轮，可缩放便签窗口内的文字和图片显示大小。",
+                created_at,
+            ),
+            "便签使用说明"
+        );
+        assert_eq!(
+            note_file_stem("", "![](images/note-1/pic.png)", created_at),
+            "2026_6_23_21-53"
+        );
+    }
+
+    #[test]
+    fn appends_suffix_for_duplicate_readable_file_names() {
+        let store = NoteStore::new(test_root("duplicate-readable-names"));
+        let first = store
+            .create_note(SaveNoteRequest {
+                title: "标签1".into(),
+                content: "第一条".into(),
+                category: String::new(),
+            })
+            .expect("create first note");
+        let second = store
+            .create_note(SaveNoteRequest {
+                title: "标签1".into(),
+                content: "第二条".into(),
+                category: String::new(),
+            })
+            .expect("create second note");
+
+        assert_eq!(first.file_name, "标签1.md");
+        assert_eq!(second.file_name, "标签1 (2).md");
     }
 }
