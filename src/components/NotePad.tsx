@@ -751,7 +751,7 @@ export function NotePad({
               <div className="flex items-center gap-0.5">
                 <button
                   onClick={() => setMode("new")}
-                  className={`relative px-3.5 py-1.5 text-[14px] rounded-t-lg transition-all duration-200 cursor-pointer ${
+                  className={`relative px-3.5 py-1.5 text-[15px] rounded-t-lg transition-all duration-200 cursor-pointer ${
                     mode === "new"
                       ? "text-bamboo font-medium"
                       : "text-ink-ghost hover:text-ink-faint"
@@ -764,7 +764,7 @@ export function NotePad({
                 </button>
                 <button
                   onClick={() => setMode("open")}
-                  className={`relative px-3.5 py-1.5 text-[14px] rounded-t-lg transition-all duration-200 cursor-pointer ${
+                  className={`relative px-3.5 py-1.5 text-[15px] rounded-t-lg transition-all duration-200 cursor-pointer ${
                     mode === "open"
                       ? "text-bamboo font-medium"
                       : "text-ink-ghost hover:text-ink-faint"
@@ -884,20 +884,12 @@ export function NotePad({
                     {errorMessage ??
                       `${countNoteChars(content)} ${t("common.wordCountUnit", { defaultValue: "字" })} · ${statusLabel[status]}`}
                   </span>
-                  <div className="flex items-center gap-2">
-                    <button
-                      onClick={resetDraft}
-                      className="px-4 py-1.5 text-[13px] text-ink-faint hover:text-ink-soft rounded-lg hover:bg-paper-warm transition-all duration-200 cursor-pointer"
-                    >
-                      {t("notepad.tab.new", { defaultValue: "新建" })}
-                    </button>
-                    <button
-                      onClick={() => void handleSave()}
-                      className="px-4 py-1.5 text-[13px] text-cloud bg-bamboo hover:bg-bamboo-light rounded-lg transition-all duration-200 font-medium cursor-pointer"
-                    >
-                      {t("common.save", { defaultValue: "保存" })}
-                    </button>
-                  </div>
+                  <button
+                    onClick={resetDraft}
+                    className="px-4 py-1.5 text-[13px] text-cloud bg-bamboo hover:bg-bamboo-light rounded-lg transition-all duration-200 font-medium cursor-pointer"
+                  >
+                    {t("notepad.tab.new", { defaultValue: "新建" })}
+                  </button>
                 </div>
               </div>
             ) : (
