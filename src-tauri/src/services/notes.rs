@@ -1407,6 +1407,71 @@ mod tests {
     }
 
     #[test]
+    fn stores_images_inside_notes_dir() {
+        let store = NoteStore::new(test_root("image-store"));
+        let note = store
+            .create_note(SaveNoteRequest {
+                title: "图".into(),
+                content: String::new(),
+                category: String::new(),
+            })
+            .expect("create note");
+
+        // images_dir lives under <notes_dir>/images/<id>, not <base_dir>/images.
+        let images_root = store.base_dir().join("notes").join("images");
+        assert!(store.images_dir(&note.id).starts_with(&images_root));
+        assert!(store.images_dir(&note.id).ends_with(note.id.as_str()));
+
+        let rel = store
+            .save_image(&note.id, b"\x89PNG\r\n", "png")
+            .expect("save image");
+        assert!(rel.starts_with(&format!("images/{}/", note.id)));
+        assert!(rel.ends_with(".png"));
+
+        // The returned relative path resolves to the real file under notes/images.
+        let file_name = rel.rsplit('/').next().expect("file name");
+        assert!(
+            store.images_dir(&note.id).join(file_name).exists(),
+            "image written under <notes_dir>/images/<id>"
+        );
+    }
+
+    #[test]
+    fn migrates_legacy_images_into_notes_dir() {
+        let store = NoteStore::new(test_root("image-migrate"));
+        let note = store
+            .create_note(SaveNoteRequest {
+                title: "图".into(),
+                content: String::new(),
+                category: String::new(),
+            })
+            .expect("create note");
+
+        // Seed an image at the legacy <base_dir>/images/<id> location.
+        let legacy_dir = store.base_dir().join("images").join(&note.id);
+        fs::create_dir_all(&legacy_dir).expect("legacy dir");
+        fs::write(legacy_dir.join("a.png"), b"png").expect("legacy image");
+
+        // Any storage op runs ensure_storage → the one-time migration.
+        store.list_notes().expect("list notes");
+
+        let migrated = store
+            .base_dir()
+            .join("notes")
+            .join("images")
+            .join(&note.id)
+            .join("a.png");
+        assert!(
+            migrated.exists(),
+            "legacy image moved into <notes_dir>/images"
+        );
+        assert!(
+            !store.base_dir().join("images").exists(),
+            "legacy <base_dir>/images removed after migration"
+        );
+    }
+
+    #[test]
     fn rebuilds_metadata_when_metadata_json_is_corrupt() {
         let store = NoteStore::new(test_root("repair"));
         let first = store

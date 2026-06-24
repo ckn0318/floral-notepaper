@@ -31,7 +31,7 @@ async function getImageDimensions(file: File): Promise<{ width: number; height: 
 /** Scale (width, height) to fit within maxWidth × maxHeight, preserving aspect
  *  ratio. Returns the fitted display width, or null when the image already fits
  *  (so small images keep their natural size and no width= is baked in). */
-function fitDisplayWidth(
+export function fitDisplayWidth(
   width: number,
   height: number,
   maxWidth: number,
