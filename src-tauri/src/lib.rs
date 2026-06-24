@@ -3,7 +3,9 @@ pub mod locales;
 pub mod services;
 
 use locales::Locale;
-use services::notes::{default_store, AppConfig, AppError, Note, NoteMetadata, SaveNoteRequest};
+use services::notes::{
+    default_store, AppConfig, AppError, Note, NoteMetadata, SaveNoteRequest, TodoItem,
+};
 use std::path::PathBuf;
 use tauri::{AppHandle, Emitter, Manager};
 
@@ -239,6 +241,16 @@ async fn open_todo_window(
 }
 
 #[tauri::command]
+fn todos_get() -> Result<Vec<TodoItem>, AppError> {
+    default_store()?.load_todos()
+}
+
+#[tauri::command]
+fn todos_save(items: Vec<TodoItem>) -> Result<(), AppError> {
+    default_store()?.save_todos(items)
+}
+
+#[tauri::command]
 fn take_startup_file() -> Option<String> {
     desktop::take_startup_file()
 }
@@ -295,6 +307,8 @@ pub fn run() {
             open_tile_window,
             toggle_tile_window,
             open_todo_window,
+            todos_get,
+            todos_save,
             take_startup_file
         ])
         .run(tauri::generate_context!())

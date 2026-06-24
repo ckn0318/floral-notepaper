@@ -82,10 +82,31 @@ export async function animateCurrentWindowBounds(
     return;
   }
 
-  await new Promise<void>((resolve, reject) => {
+  await new Promise<void>((resolve) => {
     const startedAt = globalThis.performance?.now() ?? Date.now();
+    let settled = false;
+
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(safety);
+      resolve();
+    };
+
+    const snapToTargetAndFinish = () => {
+      void setCurrentWindowBounds(target)
+        .catch(() => undefined)
+        .finally(finish);
+    };
+
+    // Safety net: requestAnimationFrame is paused while the window is occluded or
+    // sliding off-screen (e.g. the to-do panel collapsing up into its tab). If the
+    // rAF loop stalls, force the final bounds and resolve so callers never hang
+    // (a hung animation would otherwise leave their "animating" flag stuck).
+    const safety = setTimeout(snapToTargetAndFinish, durationMs + 600);
 
     const step = (timestamp: number) => {
+      if (settled) return;
       const elapsed = timestamp - startedAt;
       const progress = Math.min(1, elapsed / durationMs);
       const eased = 1 - Math.pow(1 - progress, 3);
@@ -99,13 +120,11 @@ export async function animateCurrentWindowBounds(
 
       void setCurrentWindowBounds(next)
         .then(() => {
-          if (progress < 1) {
-            raf(step);
-          } else {
-            resolve();
-          }
+          if (settled) return;
+          if (progress < 1) raf(step);
+          else snapToTargetAndFinish();
         })
-        .catch(reject);
+        .catch(snapToTargetAndFinish);
     };
 
     raf(step);

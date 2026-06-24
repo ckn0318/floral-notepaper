@@ -204,6 +204,24 @@ struct MetadataFile {
     notes: Vec<NoteMetadata>,
 }
 
+/// A single floating to-do item. `priority` is a free-form tag ("red" | "yellow"
+/// | "white") kept as a string so the backend stays agnostic to the UI palette.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TodoItem {
+    pub id: String,
+    pub text: String,
+    pub done: bool,
+    pub priority: String,
+    pub pinned: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+struct TodoListFile {
+    items: Vec<TodoItem>,
+}
+
 #[derive(Debug, Clone)]
 pub struct NoteStore {
     base_dir: PathBuf,
@@ -382,6 +400,28 @@ impl NoteStore {
         fs::create_dir_all(&config.notes_dir)?;
         write_json_atomic(&self.config_path(), &config)?;
         Ok(config)
+    }
+
+    /// The single default to-do list lives next to `notes/` under the base dir
+    /// (the install folder in release, `Documents\花笺便签` in dev).
+    pub fn todolist_path(&self) -> PathBuf {
+        self.base_dir.join("todolist").join("todolist0.json")
+    }
+
+    pub fn load_todos(&self) -> Result<Vec<TodoItem>, AppError> {
+        let path = self.todolist_path();
+        if !path.exists() {
+            return Ok(Vec::new());
+        }
+        // A corrupt file shouldn't break the window — fall back to an empty list.
+        let file: TodoListFile =
+            serde_json::from_str(&fs::read_to_string(&path)?).unwrap_or_default();
+        Ok(file.items)
+    }
+
+    pub fn save_todos(&self, items: Vec<TodoItem>) -> Result<(), AppError> {
+        write_json_atomic(&self.todolist_path(), &TodoListFile { items })?;
+        Ok(())
     }
 
     pub fn list_notes(&self) -> Result<Vec<NoteMetadata>, AppError> {
@@ -1469,6 +1509,40 @@ mod tests {
             !store.base_dir().join("images").exists(),
             "legacy <base_dir>/images removed after migration"
         );
+    }
+
+    #[test]
+    fn persists_and_reloads_todos() {
+        let store = NoteStore::new(test_root("todos"));
+        assert!(store.load_todos().expect("empty load").is_empty());
+
+        let items = vec![
+            TodoItem {
+                id: "a".into(),
+                text: "写文档".into(),
+                done: false,
+                priority: "red".into(),
+                pinned: true,
+            },
+            TodoItem {
+                id: "b".into(),
+                text: "测试".into(),
+                done: true,
+                priority: "white".into(),
+                pinned: false,
+            },
+        ];
+        store.save_todos(items.clone()).expect("save todos");
+
+        let loaded = store.load_todos().expect("reload todos");
+        assert_eq!(loaded.len(), 2);
+        assert_eq!(loaded[0].id, "a");
+        assert!(loaded[0].pinned);
+        assert_eq!(loaded[1].priority, "white");
+        // Stored under <base_dir>/todolist, beside the notes directory.
+        assert!(store
+            .todolist_path()
+            .starts_with(store.base_dir().join("todolist")));
     }
 
     #[test]

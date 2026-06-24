@@ -7,6 +7,7 @@ import {
   closeCurrentWindow,
   getCurrentWindowBounds,
   setCurrentWindowAlwaysOnTop,
+  setCurrentWindowBounds,
   showCurrentWindow,
   startCurrentWindowDrag,
   startCurrentWindowResize,
@@ -14,6 +15,7 @@ import {
 import type { ResizeDirection } from "../features/windows/controls";
 import type { WindowBounds } from "../features/windows/api";
 import { createTodo, sortTodos, TODO_PRIORITIES } from "../features/todos/todoUtils";
+import { getTodos, saveTodos } from "../features/todos/api";
 import type { TodoItem, TodoPriority } from "../features/todos/types";
 
 // Edge-dock auto-hide tuning (physical px / ms).
@@ -21,7 +23,12 @@ const DOCK_THRESHOLD = 12; // how close the window top must be to y=0 to dock
 const TAB_W = 120; // collapsed tab pill size
 const TAB_H = 30;
 const COLLAPSE_DELAY = 300; // grace period after the pointer leaves before hiding
-const SLIDE_MS = 160;
+const SLIDE_MS = 160; // collapse (panel → tab) duration
+const REVEAL_MS = 220; // reveal (tab → panel) downward-unfold duration
+// Floor for the remembered expanded size, so a degenerate capture can never leave
+// the panel stuck too small to reveal.
+const MIN_EXPANDED_W = 240;
+const MIN_EXPANDED_H = 160;
 
 /** Checkbox colour per priority. White = neutral / no priority. */
 const PRIORITY_COLOR: Record<TodoPriority, string> = {
@@ -134,6 +141,40 @@ export function TodoList() {
   const [collapsed, setCollapsed] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const hasEntered = useRef(false);
+  // Persistence: don't save until the initial disk load has populated state, and
+  // keep a live ref so close-handlers can flush the latest list synchronously.
+  const loadedRef = useRef(false);
+  const todosRef = useRef<TodoItem[]>([]);
+
+  useEffect(() => {
+    todosRef.current = todos;
+  }, [todos]);
+
+  // Load the persisted list once on mount.
+  useEffect(() => {
+    let cancelled = false;
+    getTodos()
+      .then((items) => {
+        if (!cancelled) setTodos(items);
+      })
+      .catch(() => undefined)
+      .finally(() => {
+        loadedRef.current = true;
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Persist on change (debounced), but only after the initial load so the empty
+  // starting state never overwrites a saved list.
+  useEffect(() => {
+    if (!loadedRef.current) return;
+    const timer = window.setTimeout(() => {
+      void saveTodos(todos).catch(() => undefined);
+    }, 350);
+    return () => window.clearTimeout(timer);
+  }, [todos]);
 
   // Edge-dock auto-hide state (kept in refs so the window-level event handlers,
   // installed once, always read the latest values).
@@ -192,13 +233,22 @@ export function TodoList() {
       height: TAB_H,
     });
 
+    // Snap the expanded geometry to the top edge, flooring the size so a bad read
+    // never produces an un-revealable panel.
+    const captureExpanded = (bounds: WindowBounds): WindowBounds => ({
+      x: bounds.x,
+      y: 0,
+      width: Math.max(bounds.width, MIN_EXPANDED_W),
+      height: Math.max(bounds.height, MIN_EXPANDED_H),
+    });
+
     const evaluateDock = async () => {
       if (animatingRef.current || collapsedRef.current) return;
       const bounds = await getCurrentWindowBounds().catch(() => null);
       if (!bounds) return;
       if (bounds.y <= DOCK_THRESHOLD) {
         dockedRef.current = true;
-        const expanded = { x: bounds.x, y: 0, width: bounds.width, height: bounds.height };
+        const expanded = captureExpanded(bounds);
         expandedRef.current = expanded;
         if (bounds.y !== 0) {
           animatingRef.current = true;
@@ -216,7 +266,7 @@ export function TodoList() {
       // Re-capture geometry in case the panel was resized while open.
       const bounds = await getCurrentWindowBounds().catch(() => null);
       if (bounds) {
-        expandedRef.current = { x: bounds.x, y: 0, width: bounds.width, height: bounds.height };
+        expandedRef.current = captureExpanded(bounds);
       }
       const exp = expandedRef.current;
       if (!exp) return;
@@ -229,17 +279,22 @@ export function TodoList() {
 
     const reveal = async () => {
       if (!collapsedRef.current || animatingRef.current) return;
-      const exp = expandedRef.current;
-      if (!exp) {
-        setCollapsed(false);
-        collapsedRef.current = false;
-        return;
-      }
-      animatingRef.current = true;
-      await animateCurrentWindowBounds(exp, SLIDE_MS).catch(() => undefined);
-      animatingRef.current = false;
-      setCollapsed(false);
+      // Render the panel first, then unfold downward: snap to full width as a thin
+      // strip at the top edge, then animate only the height open so the content is
+      // revealed top-to-bottom (instead of the tab pill stretching up to size).
       collapsedRef.current = false;
+      setCollapsed(false);
+      const exp = expandedRef.current;
+      if (!exp) return;
+      animatingRef.current = true;
+      await setCurrentWindowBounds({
+        x: exp.x,
+        y: 0,
+        width: exp.width,
+        height: Math.min(TAB_H, exp.height),
+      }).catch(() => undefined);
+      await animateCurrentWindowBounds(exp, REVEAL_MS).catch(() => undefined);
+      animatingRef.current = false;
     };
 
     const onMoved = () => {
@@ -300,7 +355,13 @@ export function TodoList() {
   }, []);
 
   const close = useCallback(() => {
-    void closeCurrentWindow().catch(() => undefined);
+    // Flush the latest list before the window is destroyed, so edits made within
+    // the save debounce window aren't lost.
+    void saveTodos(todosRef.current)
+      .catch(() => undefined)
+      .finally(() => {
+        void closeCurrentWindow().catch(() => undefined);
+      });
   }, []);
 
   // Esc closes the to-do window only — the notepad is a separate window and is
