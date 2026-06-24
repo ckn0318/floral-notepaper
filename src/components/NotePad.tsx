@@ -31,6 +31,7 @@ import {
   startCurrentWindowResize,
 } from "../features/windows/controls";
 import type { ResizeDirection } from "../features/windows/controls";
+import { openTodoWindow } from "../features/windows/api";
 import { getConfig, saveConfig } from "../features/settings/api";
 import {
   DEFAULT_TILE_COLOR,
@@ -528,6 +529,13 @@ export function NotePad({
     }
   };
 
+  // Summon the floating to-do list as a separate window. It opens at a fixed
+  // default spot (computed in Rust: top-left, hugging the screen top) so it's
+  // immediately armed to auto-hide upward. Coexists with the notepad.
+  const handleSummonTodo = async () => {
+    await openTodoWindow().catch(() => undefined);
+  };
+
   const handleClose = useCallback(
     (options?: { resume?: boolean }) => {
       // Esc arms resume (content + window geometry); × / 取消钉屏 (default) leaves
@@ -770,6 +778,26 @@ export function NotePad({
               </div>
 
               <div className="flex items-center gap-1.5">
+                <button
+                  onClick={() => void handleSummonTodo()}
+                  className="group w-7 h-7 flex items-center justify-center rounded-lg transition-all duration-200 cursor-pointer text-ink-ghost hover:text-ink-faint hover:bg-paper-warm"
+                  title={t("notepad.tooltip.summonTodo", { defaultValue: "呼出待办清单" })}
+                >
+                  <svg
+                    width="14"
+                    height="14"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <path d="M9 6h11M9 12h11M9 18h11" />
+                    <path d="M4.5 6h.01M4.5 12h.01M4.5 18h.01" />
+                  </svg>
+                </button>
+
                 <button
                   onClick={() => void handlePin()}
                   className="group w-7 h-7 flex items-center justify-center rounded-lg transition-all duration-200 cursor-pointer text-ink-ghost hover:text-ink-faint hover:bg-paper-warm"

@@ -2,7 +2,7 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
   "description": "Capability for Floral Notepaper windows",
-  "windows": ["notepad", "notepad-*", "tile-*"],
+  "windows": ["notepad", "notepad-*", "tile-*", "todo"],
   "permissions": [
     "core:default",
     "core:window:allow-close",

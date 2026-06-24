@@ -133,6 +133,55 @@ body {
   border-radius: var(--app-surface-radius);
 }
 
+/* Floating to-do list — a translucent dark glass panel, always dark-themed
+   (white text on a see-through dark surface) to match the reference design,
+   independent of the app light/dark theme. backdrop-filter blurs same-document
+   content; on a transparent Windows webview it cannot blur the desktop behind,
+   so the see-through look comes from the rgba background. */
+.todo-panel {
+  background: rgba(28, 27, 25, 0.9);
+  -webkit-backdrop-filter: blur(16px);
+  backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.35);
+  color: #e7e3dc;
+}
+.todo-text {
+  color: #e7e3dc;
+}
+.todo-text-faint {
+  color: #8f8c84;
+}
+.todo-input {
+  color: #e7e3dc;
+}
+.todo-input::placeholder {
+  color: #6f6c66;
+}
+.todo-icon-btn {
+  color: #8f8c84;
+}
+.todo-icon-btn:hover {
+  color: #f87171;
+}
+.todo-add-row {
+  background: rgba(255, 255, 255, 0.05);
+  transition: background 0.15s ease;
+}
+.todo-add-row:focus-within {
+  background: rgba(255, 255, 255, 0.09);
+}
+.todo-item-hover:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
+/* Collapsed edge-dock tab pill. Slightly more opaque than the panel so the slim
+   strip stays legible against any wallpaper. */
+.todo-tab {
+  background: rgba(28, 27, 25, 0.95);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4);
+}
+
 .mac-window-controls {
   height: 100%;
 }

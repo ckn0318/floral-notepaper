@@ -40,6 +40,14 @@ pub fn tile_window_title(locale: Locale) -> &'static str {
     }
 }
 
+pub fn todo_window_title(locale: Locale) -> &'static str {
+    match locale {
+        Locale::ZhCn => "待办清单",
+        Locale::EnUs => "Floral Notepaper To-do List",
+        Locale::ZhHk => "待辦清單",
+    }
+}
+
 pub fn tray_tooltip(locale: Locale) -> &'static str {
     app_name(locale)
 }

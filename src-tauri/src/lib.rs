@@ -231,6 +231,14 @@ async fn toggle_tile_window(
 }
 
 #[tauri::command]
+async fn open_todo_window(
+    app: AppHandle,
+    bounds: Option<desktop::WindowBounds>,
+) -> Result<String, AppError> {
+    desktop::open_todo_window(app, bounds).await
+}
+
+#[tauri::command]
 fn take_startup_file() -> Option<String> {
     desktop::take_startup_file()
 }
@@ -286,6 +294,7 @@ pub fn run() {
             recycle_notepad_window,
             open_tile_window,
             toggle_tile_window,
+            open_todo_window,
             take_startup_file
         ])
         .run(tauri::generate_context!())

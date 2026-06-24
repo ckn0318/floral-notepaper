@@ -3,6 +3,7 @@ import "./App.css";
 import { ContextMenuProvider } from "./components/ContextMenu";
 import { NotePad } from "./components/NotePad";
 import { TileShowcase } from "./components/TileShowcase";
+import { TodoList } from "./components/TodoList";
 import { tabToIndentListener } from "indent-textarea";
 import { getConfig } from "./features/settings/api";
 import { applyTheme, watchSystemTheme } from "./features/settings/theme";
@@ -81,6 +82,8 @@ function App() {
       <div className="app-window-shell h-screen font-body text-ink overflow-hidden">
         {activeView === "notepad" ? (
           <NotePad initialNoteId={route.noteId} />
+        ) : activeView === "todo" ? (
+          <TodoList />
         ) : (
           <TileShowcase noteId={route.noteId} />
         )}

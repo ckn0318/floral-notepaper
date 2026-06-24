@@ -23,6 +23,7 @@ use tauri_plugin_autostart::{MacosLauncher, ManagerExt as AutostartExt};
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
 
 const NOTEPAD_WINDOW_LABEL: &str = "notepad";
+const TODO_WINDOW_LABEL: &str = "todo";
 const TRAY_ID: &str = "notepad-tray";
 const TRAY_SHOW_NOTEPAD_ID: &str = "show-notepad";
 const TRAY_QUICK_NOTE_ID: &str = "quick-note";
@@ -135,6 +136,9 @@ struct WindowOpenOptions {
     always_on_top: bool,
     shadow: bool,
     skip_taskbar: bool,
+    /// When false, Windows Aero Snap won't maximize the window if it's dragged to
+    /// the top edge — needed so the to-do window can dock there instead.
+    maximizable: bool,
     bounds: Option<WindowBounds>,
 }
 
@@ -333,6 +337,8 @@ fn refresh_window_titles(app: &AppHandle, config: &AppConfig) -> Result<(), AppE
             window.set_title(locales::notepad_window_title(locale))?;
         } else if label.starts_with("tile-") {
             window.set_title(locales::tile_window_title(locale))?;
+        } else if label == TODO_WINDOW_LABEL {
+            window.set_title(locales::todo_window_title(locale))?;
         }
     }
 
@@ -531,6 +537,13 @@ pub async fn toggle_tile_window(
     bounds: Option<WindowBounds>,
 ) -> Result<bool, AppError> {
     toggle_tile_window_now(&app, &note_id, bounds)
+}
+
+pub async fn open_todo_window(
+    app: AppHandle,
+    bounds: Option<WindowBounds>,
+) -> Result<String, AppError> {
+    open_todo_window_now(&app, bounds)
 }
 
 pub fn extract_file_arg(args: &[String]) -> Option<String> {
@@ -751,6 +764,7 @@ fn open_notepad_window_now(
             always_on_top: true,
             shadow: false,
             skip_taskbar: true,
+            maximizable: true,
             bounds: effective_bounds,
         },
     )
@@ -821,6 +835,17 @@ fn notepad_window_specs() -> WindowSizeSpec {
         height: 300.0,
         min_width: 320.0,
         min_height: 180.0,
+    }
+}
+
+/// To-do window: same default size as the notepad, but a much smaller minimum so
+/// the edge-dock auto-hide can shrink it down to a slim tab pill.
+fn todo_window_specs() -> WindowSizeSpec {
+    WindowSizeSpec {
+        width: 350.0,
+        height: 300.0,
+        min_width: 60.0,
+        min_height: 20.0,
     }
 }
 
@@ -904,6 +929,20 @@ fn fixed_notepad_bounds() -> Option<WindowBounds> {
     })
 }
 
+/// Fixed default spot for the to-do window: to the left of the notepad's default
+/// position and flush against the top edge (y≈0), so it opens already armed to
+/// auto-hide upward without first being dragged to the top.
+fn fixed_todo_bounds() -> Option<WindowBounds> {
+    let np = fixed_notepad_bounds()?;
+    let width = np.width as i32;
+    Some(WindowBounds {
+        x: np.x - width - 12,
+        y: (np.y - 24).max(0),
+        width: np.width,
+        height: np.height,
+    })
+}
+
 fn visible_tile_window(app: &AppHandle) -> Option<tauri::WebviewWindow> {
     app.webview_windows()
         .into_iter()
@@ -942,7 +981,35 @@ fn open_tile_window_now(
             always_on_top: true,
             shadow: false,
             skip_taskbar: true,
+            maximizable: true,
             bounds,
+        },
+    )
+}
+
+/// Opens (or focuses) the floating to-do list window. It is a standalone window
+/// that coexists with the notepad — summoned from the pad header, closed on its
+/// own via the × button without affecting the notepad. Shares the notepad size.
+fn open_todo_window_now(app: &AppHandle, bounds: Option<WindowBounds>) -> Result<String, AppError> {
+    let locale = configured_locale();
+    let label = TODO_WINDOW_LABEL.to_string();
+    let url = "index.html?view=todo".to_string();
+    let specs = todo_window_specs();
+
+    open_or_focus_window(
+        app,
+        &label,
+        WindowOpenOptions {
+            url,
+            title: locales::todo_window_title(locale).to_string(),
+            specs,
+            decorations: false,
+            always_on_top: true,
+            shadow: false,
+            skip_taskbar: true,
+            // No Aero-Snap maximize, so dragging to the top edge docks instead.
+            maximizable: false,
+            bounds: bounds.or_else(fixed_todo_bounds),
         },
     )
 }
@@ -986,6 +1053,7 @@ fn open_or_focus_window(
         .inner_size(opts.specs.width, opts.specs.height)
         .min_inner_size(opts.specs.min_width, opts.specs.min_height)
         .resizable(true)
+        .maximizable(opts.maximizable)
         .decorations(opts.decorations)
         .transparent(visual_options.transparent)
         .always_on_top(opts.always_on_top)
@@ -1791,6 +1859,17 @@ mod tests {
         assert_eq!(specs.height, 300.0);
         assert_eq!(specs.min_width, 320.0);
         assert_eq!(specs.min_height, 180.0);
+    }
+
+    #[test]
+    fn lets_todo_window_shrink_to_a_tab() {
+        let specs = todo_window_specs();
+
+        assert_eq!(specs.width, 350.0);
+        assert_eq!(specs.height, 300.0);
+        // Minimum small enough for the collapsed tab pill.
+        assert!(specs.min_width <= 120.0);
+        assert!(specs.min_height <= 30.0);
     }
 
     #[test]

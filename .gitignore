@@ -33,6 +33,7 @@ PROGRESS.md
 AGENTS.md
 CLAUDE.md
 .codex
+.claude/
 
 ## IDE
 .idea/
