@@ -15,6 +15,7 @@ export interface TileProps extends Omit<
   width?: number | string;
   rotation?: number;
   fontSize?: number;
+  zoom?: number;
   renderMarkdown?: boolean;
   imageBaseDir?: string;
 }
@@ -75,6 +76,7 @@ export function Tile({
   width = 260,
   rotation = 0,
   fontSize = 16,
+  zoom = 1,
   renderMarkdown = false,
   imageBaseDir,
   className = "",
@@ -95,6 +97,11 @@ export function Tile({
       emptyColor: chroma.mix(tileColor, mixTarget, 0.25).alpha(0.4).css(),
     };
   }, [tileColor]);
+  const contentScaleStyle: CSSProperties = {
+    width: `${100 / zoom}%`,
+    minHeight: `${100 / zoom}%`,
+    zoom,
+  };
   const mergedStyle: CSSProperties = {
     width,
     backgroundColor: tileColor,
@@ -111,40 +118,42 @@ export function Tile({
       style={mergedStyle}
     >
       <div className="px-4 pt-4 pb-4 h-full overflow-y-auto scrollbar-hidden">
-        {title && (
-          <div
-            className="font-display font-semibold tracking-wide mb-3 leading-snug"
-            style={{ color: titleColor, fontSize: `${fontSize + 1}px` }}
-          >
-            {title}
-          </div>
-        )}
-        {content ? (
-          renderMarkdown ? (
-            <div style={{ color: contentColor }}>
-              <MarkdownPreview
-                content={content}
-                fontSize={fontSize}
-                renderHtml={false}
-                imageBaseDir={imageBaseDir}
-              />
+        <div style={contentScaleStyle}>
+          {title && (
+            <div
+              className="font-display font-semibold tracking-wide mb-3 leading-snug"
+              style={{ color: titleColor, fontSize: `${fontSize + 1}px` }}
+            >
+              {title}
             </div>
+          )}
+          {content ? (
+            renderMarkdown ? (
+              <div style={{ color: contentColor }}>
+                <MarkdownPreview
+                  content={content}
+                  fontSize={fontSize}
+                  renderHtml={false}
+                  imageBaseDir={imageBaseDir}
+                />
+              </div>
+            ) : (
+              <div
+                className="leading-[1.8] whitespace-pre-wrap font-body"
+                style={{ color: contentColor, fontSize: `${fontSize}px` }}
+              >
+                {content}
+              </div>
+            )
           ) : (
             <div
-              className="leading-[1.8] whitespace-pre-wrap font-body"
-              style={{ color: contentColor, fontSize: `${fontSize}px` }}
+              className="font-body text-center py-6"
+              style={{ color: emptyColor, fontSize: `${fontSize}px` }}
             >
-              {content}
+              {t("tile.empty", { defaultValue: "空" })}
             </div>
-          )
-        ) : (
-          <div
-            className="font-body text-center py-6"
-            style={{ color: emptyColor, fontSize: `${fontSize}px` }}
-          >
-            {t("tile.empty", { defaultValue: "空" })}
-          </div>
-        )}
+          )}
+        </div>
       </div>
 
       <CornerMarks color={cornerColor} />

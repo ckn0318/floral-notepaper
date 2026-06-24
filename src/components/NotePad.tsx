@@ -700,6 +700,7 @@ export function NotePad({
           content={errorMessage || content}
           color={tileColor}
           fontSize={surfaceFontSize}
+          zoom={surfaceZoom}
           renderMarkdown={!errorMessage}
           imageBaseDir={imageBaseDir ?? undefined}
           width="100%"
