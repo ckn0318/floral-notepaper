@@ -20,8 +20,8 @@ import type { TodoItem, TodoPriority } from "../features/todos/types";
 
 // Edge-dock auto-hide tuning (physical px / ms).
 const DOCK_THRESHOLD = 12; // how close the window top must be to y=0 to dock
-const TAB_W = 120; // collapsed tab pill size
-const TAB_H = 30;
+const TAB_W = 180; // collapsed tab pill size (fits 旗标 + 待办清单-N条)
+const TAB_H = 40;
 const COLLAPSE_DELAY = 300; // grace period after the pointer leaves before hiding
 const SLIDE_MS = 160; // collapse (panel → tab) duration
 const REVEAL_MS = 220; // reveal (tab → panel) downward-unfold duration
@@ -68,11 +68,11 @@ interface ItemMenu {
   y: number;
 }
 
-function FlagIcon({ filled }: { filled: boolean }) {
+function FlagIcon({ filled, size = 16 }: { filled: boolean; size?: number }) {
   return (
     <svg
-      width="16"
-      height="16"
+      width={size}
+      height={size}
       viewBox="0 0 24 24"
       fill={filled ? "currentColor" : "none"}
       stroke="currentColor"
@@ -502,11 +502,27 @@ export function TodoList() {
   // Collapsed: a slim pill hugging the top edge; hovering it slides the panel
   // back into view (handled by the auto-hide effect's pointer-enter).
   if (collapsed) {
+    // Glance summary: urgency flag by highest pending priority (red > yellow >
+    // white; none when there are no pending items), title, and the pending count
+    // in yellow.
+    const pending = todos.filter((todo) => !todo.done);
+    const flagColor = pending.some((todo) => todo.priority === "red")
+      ? PRIORITY_COLOR.red
+      : pending.some((todo) => todo.priority === "yellow")
+        ? PRIORITY_COLOR.yellow
+        : pending.length > 0
+          ? "#d8d5cd"
+          : null;
     return (
       <div className="w-full h-screen flex bg-transparent">
-        <div className="todo-tab app-surface-frame w-full h-full flex items-center justify-center select-none cursor-pointer">
-          <span className="text-[12.5px] font-display font-semibold tracking-wide todo-text truncate px-3">
-            {t("todo.title", { defaultValue: "待办清单" })}
+        <div className="todo-tab app-surface-frame w-full h-full flex items-center justify-center gap-1.5 select-none cursor-pointer px-3">
+          {flagColor && (
+            <span className="shrink-0 flex items-center" style={{ color: flagColor }}>
+              <FlagIcon filled size={18} />
+            </span>
+          )}
+          <span className="text-[14.5px] font-display font-semibold tracking-wide truncate todo-text">
+            {t("todo.title", { defaultValue: "待办清单" })}-{pending.length}条
           </span>
         </div>
       </div>
