@@ -929,15 +929,84 @@ fn fixed_notepad_bounds() -> Option<WindowBounds> {
     })
 }
 
-/// Fixed default spot for the to-do window: to the left of the notepad's default
-/// position and flush against the top edge (y≈0), so it opens already armed to
-/// auto-hide upward without first being dragged to the top.
+/// Fixed default spot for the to-do window: horizontally centered along the top
+/// edge of the screen (y≈0), so once collapsed the tab pill sits centered at the
+/// top like a phone's Dynamic Island, and it opens already armed to auto-hide up.
+#[cfg(target_os = "windows")]
+#[allow(clippy::upper_case_acronyms)]
+fn fixed_todo_bounds() -> Option<WindowBounds> {
+    #[repr(C)]
+    struct POINT {
+        x: i32,
+        y: i32,
+    }
+    #[repr(C)]
+    struct RECT {
+        left: i32,
+        top: i32,
+        right: i32,
+        bottom: i32,
+    }
+    #[repr(C)]
+    struct MONITORINFO {
+        cb_size: u32,
+        rc_monitor: RECT,
+        rc_work: RECT,
+        dw_flags: u32,
+    }
+    type HMONITOR = isize;
+    const MONITOR_DEFAULTTONEAREST: u32 = 2;
+    extern "system" {
+        fn MonitorFromPoint(pt: POINT, dw_flags: u32) -> HMONITOR;
+        fn GetMonitorInfoW(h_monitor: HMONITOR, lpmi: *mut MONITORINFO) -> i32;
+        fn GetDpiForSystem() -> u32;
+    }
+    let specs = todo_window_specs();
+    let scale = unsafe { GetDpiForSystem() } as f64 / 96.0;
+    let w = (specs.width * scale) as i32;
+    let h = (specs.height * scale) as i32;
+    let mut x = 24;
+    let mut y = 0;
+
+    let hmon = unsafe { MonitorFromPoint(POINT { x: 0, y: 0 }, MONITOR_DEFAULTTONEAREST) };
+    if hmon != 0 {
+        let mut mi = MONITORINFO {
+            cb_size: std::mem::size_of::<MONITORINFO>() as u32,
+            rc_monitor: RECT {
+                left: 0,
+                top: 0,
+                right: 0,
+                bottom: 0,
+            },
+            rc_work: RECT {
+                left: 0,
+                top: 0,
+                right: 0,
+                bottom: 0,
+            },
+            dw_flags: 0,
+        };
+        if unsafe { GetMonitorInfoW(hmon, &mut mi) } != 0 {
+            let work = &mi.rc_work;
+            x = work.left + (work.right - work.left - w) / 2;
+            y = work.top;
+        }
+    }
+
+    Some(WindowBounds {
+        x,
+        y,
+        width: w as u32,
+        height: h as u32,
+    })
+}
+
+#[cfg(not(target_os = "windows"))]
 fn fixed_todo_bounds() -> Option<WindowBounds> {
     let np = fixed_notepad_bounds()?;
-    let width = np.width as i32;
     Some(WindowBounds {
-        x: np.x - width - 12,
-        y: (np.y - 24).max(0),
+        x: np.x.max(24),
+        y: 0,
         width: np.width,
         height: np.height,
     })
