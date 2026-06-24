@@ -131,6 +131,24 @@ function Checkbox({
   );
 }
 
+// Character offset under a click point, so single-clicking an item puts the
+// caret where you clicked (WebView2/Chromium exposes caretRangeFromPoint).
+function caretOffsetFromClick(clientX: number, clientY: number): number | null {
+  const doc = document as Document & {
+    caretRangeFromPoint?: (x: number, y: number) => Range | null;
+    caretPositionFromPoint?: (x: number, y: number) => { offset: number } | null;
+  };
+  if (doc.caretRangeFromPoint) {
+    const range = doc.caretRangeFromPoint(clientX, clientY);
+    return range ? range.startOffset : null;
+  }
+  if (doc.caretPositionFromPoint) {
+    const pos = doc.caretPositionFromPoint(clientX, clientY);
+    return pos ? pos.offset : null;
+  }
+  return null;
+}
+
 export function TodoList() {
   const { t } = useTranslation();
   const [todos, setTodos] = useState<TodoItem[]>([]);
@@ -139,6 +157,11 @@ export function TodoList() {
   const [completedCollapsed, setCompletedCollapsed] = useState(false);
   // collapsed = currently hidden as a slim tab at the top edge.
   const [collapsed, setCollapsed] = useState(false);
+  // Inline plain-text editing of an existing item (double-click or context menu).
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editingText, setEditingText] = useState("");
+  // Caret offset to apply when the edit input mounts (from where the user clicked).
+  const pendingCaretRef = useRef<number | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const hasEntered = useRef(false);
   // Persistence: don't save until the initial disk load has populated state, and
@@ -421,6 +444,28 @@ export function TodoList() {
     setMenu(null);
   }, []);
 
+  const startEdit = useCallback((id: string, text: string) => {
+    setEditingId(id);
+    setEditingText(text);
+    setMenu(null);
+  }, []);
+
+  // Commit the inline edit (blur / Enter). Empty text deletes the item.
+  const commitEdit = () => {
+    if (editingId != null) {
+      const next = editingText.trim();
+      if (next) {
+        setTodos((current) =>
+          current.map((todo) => (todo.id === editingId ? { ...todo, text: next } : todo)),
+        );
+      } else {
+        setTodos((current) => current.filter((todo) => todo.id !== editingId));
+      }
+    }
+    setEditingId(null);
+  };
+  const cancelEdit = () => setEditingId(null);
+
   const openItemMenu = useCallback((event: MouseEvent, id: string) => {
     event.preventDefault();
     event.stopPropagation();
@@ -455,13 +500,43 @@ export function TodoList() {
         color={PRIORITY_COLOR[todo.priority]}
         onToggle={() => toggleDone(todo.id)}
       />
-      <span
-        className={`flex-1 min-w-0 text-[13.5px] leading-snug break-words ${
-          todo.done ? "line-through todo-text-faint" : "todo-text"
-        }`}
-      >
-        {todo.text}
-      </span>
+      {editingId === todo.id ? (
+        <input
+          autoFocus
+          value={editingText}
+          onChange={(event) => setEditingText(event.target.value)}
+          onFocus={(event) => {
+            const pos = pendingCaretRef.current;
+            pendingCaretRef.current = null;
+            if (pos != null) event.currentTarget.setSelectionRange(pos, pos);
+          }}
+          onMouseDown={(event) => event.stopPropagation()}
+          onKeyDown={(event) => {
+            event.stopPropagation();
+            if (event.key === "Enter") {
+              event.preventDefault();
+              commitEdit();
+            } else if (event.key === "Escape") {
+              event.preventDefault();
+              cancelEdit();
+            }
+          }}
+          onBlur={commitEdit}
+          className="flex-1 min-w-0 bg-transparent border-none outline-none text-[14.5px] leading-snug todo-text"
+        />
+      ) : (
+        <span
+          onClick={(event) => {
+            pendingCaretRef.current = caretOffsetFromClick(event.clientX, event.clientY);
+            startEdit(todo.id, todo.text);
+          }}
+          className={`flex-1 min-w-0 text-[14.5px] leading-snug break-words cursor-text ${
+            todo.done ? "line-through todo-text-faint" : "todo-text"
+          }`}
+        >
+          {todo.text}
+        </span>
+      )}
       {todo.pinned && (
         <span
           className="shrink-0 mt-0.5 todo-text-faint"
@@ -544,11 +619,11 @@ export function TodoList() {
             type="button"
             onClick={close}
             title={t("notepad.tooltip.close", { defaultValue: "关闭" })}
-            className="group w-7 h-7 flex items-center justify-center rounded-lg todo-icon-btn hover:bg-danger-bg transition-all duration-200 cursor-pointer"
+            className="group w-8 h-8 flex items-center justify-center rounded-lg todo-icon-btn hover:bg-danger-bg transition-all duration-200 cursor-pointer"
           >
             <svg
-              width="13"
-              height="13"
+              width="16"
+              height="16"
               viewBox="0 0 24 24"
               fill="none"
               stroke="currentColor"
