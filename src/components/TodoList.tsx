@@ -21,8 +21,8 @@ import type { TodoItem, TodoPriority } from "../features/todos/types";
 
 // Edge-dock auto-hide tuning (physical px / ms).
 const DOCK_THRESHOLD = 12; // how close the window top must be to y=0 to dock
-const TAB_W = 180; // collapsed tab pill size (fits 旗标 + 待办清单-N条)
-const TAB_H = 40;
+const TAB_W = 145; // collapsed tab pill size (fits 旗标 + 待办清单-N条)
+const TAB_H = 33;
 const COLLAPSE_DELAY = 300; // grace period after the pointer leaves before hiding
 const SLIDE_MS = 160; // collapse (panel → tab) duration
 const REVEAL_MS = 220; // reveal (tab → panel) downward-unfold duration
@@ -348,28 +348,42 @@ export function TodoList() {
       }, 220);
     };
 
-    const onPointerEnter = () => {
-      clearCollapse();
-      if (collapsedRef.current) void reveal();
-    };
-
-    const onPointerLeave = () => {
+    const scheduleCollapse = () => {
       if (!dockedRef.current || collapsedRef.current) return;
       // Never hide while the user is dragging the window (the cursor slipping past
       // the moving edge would otherwise trigger a collapse).
       if (draggingRef.current) return;
       // Don't hide while editing — an input is focused (adding or inline-editing a
-      // task); the pointer leaving shouldn't interrupt typing.
+      // task); leaving/blurring shouldn't interrupt typing.
       if (document.activeElement instanceof HTMLInputElement) return;
       clearCollapse();
       collapseTimer = window.setTimeout(() => void collapse(), COLLAPSE_DELAY);
     };
+
+    const onPointerEnter = () => {
+      clearCollapse();
+      if (collapsedRef.current) void reveal();
+    };
+
+    // Hide when the pointer leaves the window, or when the window loses focus
+    // (e.g. clicking another app — the pointer's mouseleave is unreliable then).
+    const onPointerLeave = () => scheduleCollapse();
 
     void win
       .onMoved(() => onMoved())
       .then((fn) => {
         if (disposed) fn();
         else unlistenMoved = fn;
+      });
+
+    let unlistenFocus: (() => void) | null = null;
+    void win
+      .onFocusChanged(({ payload: focused }) => {
+        if (!focused) scheduleCollapse();
+      })
+      .then((fn) => {
+        if (disposed) fn();
+        else unlistenFocus = fn;
       });
 
     const root = document.documentElement;
@@ -383,6 +397,7 @@ export function TodoList() {
     return () => {
       disposed = true;
       unlistenMoved?.();
+      unlistenFocus?.();
       root.removeEventListener("mouseenter", onPointerEnter);
       root.removeEventListener("mouseleave", onPointerLeave);
       if (moveTimer != null) clearTimeout(moveTimer);
@@ -683,6 +698,10 @@ export function TodoList() {
                 if (event.key === "Enter") {
                   event.preventDefault();
                   addTodo();
+                  // Blur after adding so the input no longer holds focus — this
+                  // lets the window auto-collapse when the pointer leaves / it
+                  // loses focus (otherwise the still-focused input blocks it).
+                  event.currentTarget.blur();
                 }
               }}
               placeholder={t("todo.addTask", { defaultValue: "添加任务" })}
