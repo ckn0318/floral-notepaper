@@ -255,6 +255,11 @@ fn take_startup_file() -> Option<String> {
     desktop::take_startup_file()
 }
 
+#[tauri::command]
+fn take_startup_note() -> Option<String> {
+    desktop::take_startup_note()
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -309,7 +314,8 @@ pub fn run() {
             open_todo_window,
             todos_get,
             todos_save,
-            take_startup_file
+            take_startup_file,
+            take_startup_note
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

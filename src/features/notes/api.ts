@@ -31,6 +31,12 @@ export function getNote(id: string): Promise<Note> {
   return invoke("notes_get", { id });
 }
 
+/** Note id to open on cold start (welcome doc seeded on first launch), consumed
+ *  once. Returns null when there's nothing to open. */
+export function takeStartupNote(): Promise<string | null> {
+  return invoke("take_startup_note");
+}
+
 export function createNote(request: SaveNoteRequest): Promise<Note> {
   return invoke("notes_create", { request });
 }

@@ -8,6 +8,7 @@ import {
   getErrorMessage,
   getNote,
   listNotes,
+  takeStartupNote,
   updateNote,
 } from "../features/notes/api";
 import { useImageBaseDir } from "../features/images/useImageBaseDir";
@@ -218,6 +219,14 @@ export function NotePad({
         if (initialNoteId) {
           const note = await getNote(initialNoteId);
           if (!cancelled) applyNote(note);
+        } else {
+          // First launch: open the seeded welcome note (pulled from the backend so
+          // it loads reliably regardless of event timing).
+          const startupNoteId = await takeStartupNote().catch(() => null);
+          if (startupNoteId && !cancelled) {
+            const note = await getNote(startupNoteId);
+            if (!cancelled) applyNote(note);
+          }
         }
       } catch (error) {
         if (!cancelled) setErrorMessage(getErrorMessage(error));

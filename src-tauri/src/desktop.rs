@@ -38,6 +38,11 @@ const TRAY_QUIT_ID: &str = "quit";
 /// previous approach of emitting an event after a hardcoded delay.
 static STARTUP_FILE: Mutex<Option<String>> = Mutex::new(None);
 
+/// Note id to open on cold start (the welcome doc seeded on first launch). Pulled
+/// and cleared by the frontend via `take_startup_note`, so the note loads reliably
+/// regardless of webview-ready timing (events emitted at setup would be missed).
+static STARTUP_NOTE: Mutex<Option<String>> = Mutex::new(None);
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TrayMenuAction {
     ShowNotepad,
@@ -605,7 +610,17 @@ fn seed_welcome_note(app: &AppHandle) -> Option<String> {
     // Mark as seeded so we never inject again, even if the user deletes the note.
     let _ = std::fs::write(&marker, b"1");
 
+    // Stash the id so the frontend can pull it on mount and open the note.
+    if let Ok(mut guard) = STARTUP_NOTE.lock() {
+        *guard = Some(note.id.clone());
+    }
+
     Some(note.id)
+}
+
+/// Takes the note id to open on cold start (welcome doc), consuming it.
+pub fn take_startup_note() -> Option<String> {
+    STARTUP_NOTE.lock().ok()?.take()
 }
 
 /// Title for the welcome note: the first `# ` heading, falling back to a default.
@@ -651,6 +666,13 @@ pub fn setup_desktop(app: &mut App) -> Result<(), Box<dyn Error>> {
         };
         if let Err(error) = result {
             eprintln!("failed to show main window on startup: {error}");
+        }
+
+        // First launch also summons the floating to-do list alongside the notepad.
+        if welcome_note_id.is_some() {
+            if let Err(error) = open_todo_window_now(app.handle(), None) {
+                eprintln!("failed to summon todo window on first launch: {error}");
+            }
         }
     }
 
