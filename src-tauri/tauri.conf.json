@@ -39,7 +39,7 @@
   "bundle": {
     "active": true,
     "targets": ["app", "dmg", "nsis", "deb", "rpm", "appimage"],
-    "resources": ["使用说明文档/使用说明.md", "使用说明文档/images/**/*"],
+    "resources": ["使用说明文档/*.md", "使用说明文档/images/**/*"],
     "linux": {
       "appimage": {
         "bundleMediaFramework": false

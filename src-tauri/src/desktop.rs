@@ -582,10 +582,17 @@ fn seed_welcome_note(app: &AppHandle) -> Option<String> {
         return None;
     }
 
-    let md_path = app
+    // Resolve the bundled doc folder and pick the markdown file inside it (found
+    // dynamically so the doc can be renamed without touching this code).
+    let doc_dir = app
         .path()
-        .resolve("使用说明文档/使用说明.md", BaseDirectory::Resource)
+        .resolve("使用说明文档", BaseDirectory::Resource)
         .ok()?;
+    let md_path = std::fs::read_dir(&doc_dir)
+        .ok()?
+        .filter_map(|entry| entry.ok())
+        .map(|entry| entry.path())
+        .find(|path| path.extension().and_then(|ext| ext.to_str()) == Some("md"))?;
     let content = std::fs::read_to_string(&md_path).ok()?;
 
     let note = store
@@ -599,12 +606,8 @@ fn seed_welcome_note(app: &AppHandle) -> Option<String> {
     // Copy the doc's images into <notes_dir>/images, preserving the per-note
     // subfolders the markdown already references (images/<id>/...), so they
     // resolve via the asset-protocol scope without rewriting any paths.
-    if let (Ok(notes_dir), Ok(images_src)) = (
-        store.notes_dir(),
-        app.path()
-            .resolve("使用说明文档/images", BaseDirectory::Resource),
-    ) {
-        let _ = copy_dir_recursive(&images_src, &notes_dir.join("images"));
+    if let Ok(notes_dir) = store.notes_dir() {
+        let _ = copy_dir_recursive(&doc_dir.join("images"), &notes_dir.join("images"));
     }
 
     // Mark as seeded so we never inject again, even if the user deletes the note.
