@@ -1,6 +1,6 @@
 use crate::{
     locales::{self, Locale},
-    services::notes::{default_store, AppConfig, AppError},
+    services::notes::{default_store, AppConfig, AppError, SaveNoteRequest},
 };
 use serde::Deserialize;
 use std::{
@@ -13,6 +13,7 @@ use std::{
 
 use tauri::{
     menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem},
+    path::BaseDirectory,
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     App, AppHandle, Emitter, Manager, PhysicalPosition, PhysicalSize, WebviewUrl,
     WebviewWindowBuilder, Window, WindowEvent, Wry,
@@ -562,6 +563,76 @@ pub fn take_startup_file() -> Option<String> {
     STARTUP_FILE.lock().ok()?.take()
 }
 
+const WELCOME_SEEDED_MARKER: &str = ".welcome-seeded";
+
+/// On the very first launch, inject the bundled usage document as a real, editable
+/// note (its markdown content plus the images it references) and return the new
+/// note id so the startup window opens it. Idempotent via a marker file in the
+/// data dir — returns `None` on later launches, if already seeded, or on any error
+/// (so a missing resource never blocks startup).
+fn seed_welcome_note(app: &AppHandle) -> Option<String> {
+    let store = default_store().ok()?;
+    let marker = store.base_dir().join(WELCOME_SEEDED_MARKER);
+    if marker.exists() {
+        return None;
+    }
+
+    let md_path = app
+        .path()
+        .resolve("使用说明文档/使用说明.md", BaseDirectory::Resource)
+        .ok()?;
+    let content = std::fs::read_to_string(&md_path).ok()?;
+
+    let note = store
+        .create_note(SaveNoteRequest {
+            title: welcome_title(&content),
+            content,
+            category: String::new(),
+        })
+        .ok()?;
+
+    // Copy the doc's images into <notes_dir>/images, preserving the per-note
+    // subfolders the markdown already references (images/<id>/...), so they
+    // resolve via the asset-protocol scope without rewriting any paths.
+    if let (Ok(notes_dir), Ok(images_src)) = (
+        store.notes_dir(),
+        app.path()
+            .resolve("使用说明文档/images", BaseDirectory::Resource),
+    ) {
+        let _ = copy_dir_recursive(&images_src, &notes_dir.join("images"));
+    }
+
+    // Mark as seeded so we never inject again, even if the user deletes the note.
+    let _ = std::fs::write(&marker, b"1");
+
+    Some(note.id)
+}
+
+/// Title for the welcome note: the first `# ` heading, falling back to a default.
+fn welcome_title(content: &str) -> String {
+    content
+        .lines()
+        .find_map(|line| line.trim().strip_prefix("# "))
+        .map(|heading| heading.trim().to_string())
+        .filter(|heading| !heading.is_empty())
+        .unwrap_or_else(|| "使用说明".to_string())
+}
+
+fn copy_dir_recursive(src: &std::path::Path, dst: &std::path::Path) -> std::io::Result<()> {
+    std::fs::create_dir_all(dst)?;
+    for entry in std::fs::read_dir(src)? {
+        let entry = entry?;
+        let path = entry.path();
+        let target = dst.join(entry.file_name());
+        if path.is_dir() {
+            copy_dir_recursive(&path, &target)?;
+        } else {
+            std::fs::copy(&path, &target)?;
+        }
+    }
+    Ok(())
+}
+
 pub fn setup_desktop(app: &mut App) -> Result<(), Box<dyn Error>> {
     app.manage(RuntimeState::default());
     setup_autostart_plugin(app.handle())?;
@@ -570,8 +641,15 @@ pub fn setup_desktop(app: &mut App) -> Result<(), Box<dyn Error>> {
     register_configured_global_shortcut(app.handle());
     setup_tray(app)?;
 
+    // First launch: inject the bundled usage doc as a note and open it.
+    let welcome_note_id = seed_welcome_note(app.handle());
+
     if !std::env::args().any(|a| a == "--silent") {
-        if let Err(error) = show_notepad_window(app.handle()) {
+        let result = match welcome_note_id.as_deref() {
+            Some(id) => open_notepad_window_now(app.handle(), Some(id), None, true).map(|_| ()),
+            None => show_notepad_window(app.handle()),
+        };
+        if let Err(error) = result {
             eprintln!("failed to show main window on startup: {error}");
         }
     }
@@ -1928,6 +2006,13 @@ mod tests {
         assert_eq!(specs.height, 300.0);
         assert_eq!(specs.min_width, 320.0);
         assert_eq!(specs.min_height, 180.0);
+    }
+
+    #[test]
+    fn welcome_title_prefers_first_heading() {
+        assert_eq!(welcome_title("# 便签使用说明\n\n正文"), "便签使用说明");
+        assert_eq!(welcome_title("没有标题\n正文"), "使用说明");
+        assert_eq!(welcome_title("#  含空格  \n"), "含空格");
     }
 
     #[test]
