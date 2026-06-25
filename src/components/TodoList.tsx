@@ -16,6 +16,7 @@ import type { ResizeDirection } from "../features/windows/controls";
 import type { WindowBounds } from "../features/windows/api";
 import { createTodo, sortTodos, TODO_PRIORITIES } from "../features/todos/todoUtils";
 import { getTodos, saveTodos } from "../features/todos/api";
+import { ThemeToggle } from "./ThemeToggle";
 import type { TodoItem, TodoPriority } from "../features/todos/types";
 
 // Edge-dock auto-hide tuning (physical px / ms).
@@ -581,18 +582,21 @@ export function TodoList() {
     // white; none when there are no pending items), title, and the pending count
     // in yellow.
     const pending = todos.filter((todo) => !todo.done);
-    const flagColor = pending.some((todo) => todo.priority === "red")
-      ? PRIORITY_COLOR.red
+    const flagKind: TodoPriority | null = pending.some((todo) => todo.priority === "red")
+      ? "red"
       : pending.some((todo) => todo.priority === "yellow")
-        ? PRIORITY_COLOR.yellow
+        ? "yellow"
         : pending.length > 0
-          ? "#d8d5cd"
+          ? "white"
           : null;
     return (
       <div className="w-full h-screen flex bg-transparent">
         <div className="todo-tab app-surface-frame w-full h-full flex items-center justify-center gap-1.5 select-none cursor-pointer px-3">
-          {flagColor && (
-            <span className="shrink-0 flex items-center" style={{ color: flagColor }}>
+          {flagKind && (
+            <span
+              className={`shrink-0 flex items-center${flagKind === "white" ? " todo-text-faint" : ""}`}
+              style={flagKind === "white" ? undefined : { color: PRIORITY_COLOR[flagKind] }}
+            >
               <FlagIcon filled size={18} />
             </span>
           )}
@@ -612,9 +616,15 @@ export function TodoList() {
           className="flex items-center justify-between px-4 pt-3 pb-2 cursor-default shrink-0"
           onMouseDown={handleDrag}
         >
-          <span className="text-[16px] font-display font-semibold tracking-wide todo-text">
-            {t("todo.title", { defaultValue: "待办清单" })}
-          </span>
+          <div className="flex items-center gap-2.5">
+            <ThemeToggle
+              size={16}
+              className="w-7 h-7 flex items-center justify-center rounded-lg todo-text-faint hover:bg-[rgba(127,127,127,0.16)] transition-all cursor-pointer"
+            />
+            <span className="text-[16px] font-display font-semibold tracking-wide todo-text">
+              {t("todo.title", { defaultValue: "待办清单" })}
+            </span>
+          </div>
           <button
             type="button"
             onClick={close}

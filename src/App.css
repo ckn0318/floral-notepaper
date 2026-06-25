@@ -133,11 +133,11 @@ body {
   border-radius: var(--app-surface-radius);
 }
 
-/* Floating to-do list — a translucent dark glass panel, always dark-themed
-   (white text on a see-through dark surface) to match the reference design,
-   independent of the app light/dark theme. backdrop-filter blurs same-document
-   content; on a transparent Windows webview it cannot blur the desktop behind,
-   so the see-through look comes from the rgba background. */
+/* Floating to-do list — a translucent glass panel. Defaults to the dark scheme;
+   light overrides live under :root[data-theme="light"] below so the window's own
+   theme toggle works. backdrop-filter blurs same-document content; on a
+   transparent Windows webview it cannot blur the desktop behind, so the
+   see-through look comes from the rgba background. */
 .todo-panel {
   background: rgba(28, 27, 25, 0.9);
   -webkit-backdrop-filter: blur(16px);
@@ -180,6 +180,43 @@ body {
   background: rgba(28, 27, 25, 0.95);
   border: 1px solid rgba(255, 255, 255, 0.1);
   box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4);
+}
+
+/* Light scheme for the to-do window (driven by its own theme toggle). */
+:root[data-theme="light"] .todo-panel {
+  background: rgba(246, 243, 236, 0.92);
+  border: 1px solid rgba(26, 26, 24, 0.1);
+  box-shadow: 0 8px 30px rgba(26, 26, 24, 0.12);
+  color: #1a1a18;
+}
+:root[data-theme="light"] .todo-text {
+  color: #1a1a18;
+}
+:root[data-theme="light"] .todo-text-faint {
+  color: #8a8a80;
+}
+:root[data-theme="light"] .todo-input {
+  color: #1a1a18;
+}
+:root[data-theme="light"] .todo-input::placeholder {
+  color: #b8b8ae;
+}
+:root[data-theme="light"] .todo-icon-btn {
+  color: #8a8a80;
+}
+:root[data-theme="light"] .todo-add-row {
+  background: rgba(26, 26, 24, 0.05);
+}
+:root[data-theme="light"] .todo-add-row:focus-within {
+  background: rgba(26, 26, 24, 0.08);
+}
+:root[data-theme="light"] .todo-item-hover:hover {
+  background: rgba(26, 26, 24, 0.05);
+}
+:root[data-theme="light"] .todo-tab {
+  background: rgba(246, 243, 236, 0.96);
+  border: 1px solid rgba(26, 26, 24, 0.12);
+  box-shadow: 0 4px 14px rgba(26, 26, 24, 0.18);
 }
 
 .mac-window-controls {

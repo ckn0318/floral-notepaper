@@ -52,6 +52,7 @@ import {
 } from "../features/windows/surfaceMode";
 import type { NoteSurfaceMode } from "../features/windows/surfaceMode";
 import { Tile } from "./Tile";
+import { ThemeToggle } from "./ThemeToggle";
 import { MarkdownEditor, type MarkdownEditorHandle } from "../features/markdown/MarkdownEditor";
 
 type OpenMode = "new" | "open";
@@ -686,6 +687,32 @@ export function NotePad({
     setErrorMessage(null);
   };
 
+  // "新建": if the current note has unsaved content, flush a save first so a quick
+  // click right after editing (before the autosave debounce fires) never drops it.
+  const handleNewDraft = async () => {
+    const nextContent = editorRef.current?.getMarkdown() ?? content;
+    const hasDraftContent = title.trim().length > 0 || nextContent.trim().length > 0;
+    const changed =
+      lastSavedRef.current.title !== title || lastSavedRef.current.content !== nextContent;
+    const shouldSave =
+      configRef.current?.noteSurfaceAutoSave !== false &&
+      changed &&
+      (editingNoteIdRef.current != null || hasDraftContent);
+
+    if (shouldSave) {
+      setContent(nextContent);
+      try {
+        await saveNote(nextContent);
+      } catch (error) {
+        setStatus("saveFailed");
+        setErrorMessage(getErrorMessage(error));
+        return; // keep the draft if saving failed
+      }
+    }
+
+    resetDraft();
+  };
+
   const handleDeleteNote = useCallback(
     async (noteId: string) => {
       setErrorMessage(null);
@@ -758,6 +785,7 @@ export function NotePad({
               onMouseDown={handleDrag}
             >
               <div className="flex items-center gap-0.5">
+                <ThemeToggle className="w-7 h-7 mr-2 flex items-center justify-center rounded-lg transition-all duration-200 cursor-pointer text-ink-ghost hover:text-ink-faint hover:bg-paper-warm" />
                 <button
                   onClick={() => setMode("new")}
                   className={`relative px-3.5 py-1.5 text-[15px] rounded-t-lg transition-all duration-200 cursor-pointer ${
@@ -894,7 +922,7 @@ export function NotePad({
                       `${countNoteChars(content)} ${t("common.wordCountUnit", { defaultValue: "字" })} · ${statusLabel[status]}`}
                   </span>
                   <button
-                    onClick={resetDraft}
+                    onClick={() => void handleNewDraft()}
                     className="px-4 py-1.5 text-[13px] text-cloud bg-bamboo hover:bg-bamboo-light rounded-lg transition-all duration-200 font-medium cursor-pointer"
                   >
                     {t("notepad.tab.new", { defaultValue: "新建" })}

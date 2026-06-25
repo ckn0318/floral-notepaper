@@ -6,7 +6,7 @@ import { TileShowcase } from "./components/TileShowcase";
 import { TodoList } from "./components/TodoList";
 import { tabToIndentListener } from "indent-textarea";
 import { getConfig } from "./features/settings/api";
-import { applyTheme, watchSystemTheme } from "./features/settings/theme";
+import { applyTheme, loadWindowTheme, watchSystemTheme } from "./features/settings/theme";
 import type { AppConfig, ThemeOption } from "./features/settings/types";
 import { getInitialRoute } from "./features/windows/windowRoutes";
 import { syncLanguage } from "./locales";
@@ -20,7 +20,9 @@ function App() {
     let cleanup = () => {};
     getConfig()
       .then((config) => {
-        const theme = (config.theme || "dark") as ThemeOption;
+        // A per-window override (set by the window's own theme toggle) wins over
+        // the shared config, so each window themes independently.
+        const theme = (loadWindowTheme() ?? config.theme ?? "dark") as ThemeOption;
         applyTheme(theme);
         cleanup = watchSystemTheme(theme);
         document.documentElement.style.setProperty(
@@ -36,7 +38,8 @@ function App() {
   useEffect(() => {
     let themeCleanup = () => {};
     const unlisten = listen<AppConfig>("config-changed", (event) => {
-      const theme = (event.payload.theme || "dark") as ThemeOption;
+      // Keep honoring this window's local override over config changes.
+      const theme = (loadWindowTheme() ?? event.payload.theme ?? "dark") as ThemeOption;
       applyTheme(theme);
       themeCleanup();
       themeCleanup = watchSystemTheme(theme);

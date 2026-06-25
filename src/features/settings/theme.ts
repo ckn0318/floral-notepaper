@@ -1,4 +1,29 @@
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import type { ThemeOption } from "./types";
+
+/** Per-window light/dark override, keyed by window label so each window (notepad,
+ *  todo) themes itself independently of the shared config and of other windows.
+ *  localStorage is shared across same-origin windows, so the label keeps them
+ *  separate. */
+function windowThemeKey(): string | null {
+  try {
+    return `floral-theme:${getCurrentWindow().label}`;
+  } catch {
+    return null; // not in a Tauri environment (tests)
+  }
+}
+
+export function loadWindowTheme(): "light" | "dark" | null {
+  const key = windowThemeKey();
+  if (!key) return null;
+  const value = localStorage.getItem(key);
+  return value === "light" || value === "dark" ? value : null;
+}
+
+export function saveWindowTheme(theme: "light" | "dark"): void {
+  const key = windowThemeKey();
+  if (key) localStorage.setItem(key, theme);
+}
 
 function resolveTheme(option: ThemeOption): "light" | "dark" {
   if (option === "system") {
