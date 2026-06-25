@@ -250,12 +250,24 @@ export function TodoList() {
       }
     };
 
-    const tabBoundsFor = (exp: WindowBounds): WindowBounds => ({
-      x: Math.round(exp.x + (exp.width - TAB_W) / 2),
-      y: 0,
-      width: TAB_W,
-      height: TAB_H,
-    });
+    // Tab pill size in PHYSICAL px = logical size × devicePixelRatio, so its CSS
+    // width stays constant (and the text always fits) regardless of the monitor's
+    // display scaling. Without this, on a 150% display 180 physical px is only
+    // 120 CSS px and the label gets truncated.
+    const tabPhysicalSize = () => {
+      const dpr = window.devicePixelRatio || 1;
+      return { width: Math.round(TAB_W * dpr), height: Math.round(TAB_H * dpr) };
+    };
+
+    const tabBoundsFor = (exp: WindowBounds): WindowBounds => {
+      const { width, height } = tabPhysicalSize();
+      return {
+        x: Math.round(exp.x + (exp.width - width) / 2),
+        y: 0,
+        width,
+        height,
+      };
+    };
 
     // Snap the expanded geometry to the top edge, flooring the size so a bad read
     // never produces an un-revealable panel.
@@ -315,7 +327,7 @@ export function TodoList() {
         x: exp.x,
         y: 0,
         width: exp.width,
-        height: Math.min(TAB_H, exp.height),
+        height: Math.min(tabPhysicalSize().height, exp.height),
       }).catch(() => undefined);
       await animateCurrentWindowBounds(exp, REVEAL_MS).catch(() => undefined);
       animatingRef.current = false;
@@ -346,8 +358,9 @@ export function TodoList() {
       // Never hide while the user is dragging the window (the cursor slipping past
       // the moving edge would otherwise trigger a collapse).
       if (draggingRef.current) return;
-      // Otherwise hide whenever the pointer leaves the window, even mid-typing /
-      // with the context menu open.
+      // Don't hide while editing — an input is focused (adding or inline-editing a
+      // task); the pointer leaving shouldn't interrupt typing.
+      if (document.activeElement instanceof HTMLInputElement) return;
       clearCollapse();
       collapseTimer = window.setTimeout(() => void collapse(), COLLAPSE_DELAY);
     };
